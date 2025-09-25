@@ -39,7 +39,7 @@ start_app:
 # Stage 2: Run Playwright tests
 run_tests:
   stage: test
-  image: mcr.microsoft.com/playwright:v1.55.1-focal
+  image: mcr.microsoft.com/playwright:v1.55.1
   script:
   - echo "Waiting for app to be ready at $APP_URL..."
   - npx wait-on $APP_URL --timeout 300000 --interval 2000 --verbose
