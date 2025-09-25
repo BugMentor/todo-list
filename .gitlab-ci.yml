@@ -13,7 +13,7 @@ variables:
   SECURITY_REPORT: "security-report.json"
   NODE_OPTIONS: "--openssl-legacy-provider"
   # APP_URL will be served by http-server on port 8080 by default
-  APP_URL: "http://localhost:8080" # Changed to localhost as http-server binds to it by default
+  APP_URL: "http://localhost:8080"
 
 default:
   image: node:$NODE_VERSION
@@ -23,12 +23,17 @@ default:
 # Stage 1: Run Playwright tests
 run_tests:
   stage: test
-  image: mcr.microsoft.com/playwright:v1.36.0-focal
+  image: mcr.microsoft.com/playwright:v1.55.1-focal
   script:
-  - echo "Installing http-server to serve static files..."
+  - echo "Installing http-server..."
   - npm install -g http-server
-  - echo "Starting TODO app in background using http-server..."
-  - http-server . -p 8080 -c-1 --silent &
+  - echo "Starting TODO app in background..."
+  - nohup http-server . -p 8080 -c-1 --silent > server.log 2>&1 &
+  - sleep 5
+  - echo "Server log:"
+  - cat server.log
+  - echo "Checking if port 8080 is open..."
+  - netstat -tlnp | grep 8080 || true
   - echo "Waiting for app to be ready at $APP_URL..."
   - npx wait-on $APP_URL --timeout 120000 --interval 2000
   - echo "Running Playwright tests..."
@@ -36,6 +41,7 @@ run_tests:
   artifacts:
     paths:
     - $REPORTS_DIR
+    - server.log
     expire_in: 1 hour
   allow_failure: false
 
@@ -73,7 +79,7 @@ duo_troubleshoot:
     name: registry.gitlab.com/gitlab-org/duo-cli:latest
     entrypoint: [ "" ]
   script:
-  - duo chat "Analyze the test failures in this pipeline and suggest potential fixes" > duo-chat-output.md
+  - duo chat "Analyze the test failures in this pipeline and suggest potential fixes"
   when: on_failure
   artifacts:
     paths:
