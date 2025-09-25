@@ -1,7 +1,8 @@
 # GitLab CI/CD pipeline for Playwright TODOs app
-# Stages: test -> report -> security -> troubleshoot
+# Stages: start -> test -> report -> security -> troubleshoot
 
 stages:
+- start
 - test
 - report
 - security
@@ -12,28 +13,36 @@ variables:
   REPORTS_DIR: "reports"
   SECURITY_REPORT: "security-report.json"
   NODE_OPTIONS: "--openssl-legacy-provider"
-  # APP_URL will be served by http-server on port 8080 by default
   APP_URL: "http://localhost:8080"
 
 default:
   image: node:$NODE_VERSION
   before_script:
-  - npm ci # Installs dependencies from package.json
+  - npm ci
 
-# Stage 1: Run Playwright tests
-run_tests:
-  stage: test
+# Stage 1: Start app
+start_app:
+  stage: start
   image: mcr.microsoft.com/playwright:v1.55.1-focal
   script:
-  - echo "Installing http-server..."
+  - echo "Starting TODO app with http-server..."
   - npm install -g http-server
-  - echo "Starting TODO app in background..."
   - nohup http-server . -p 8080 -c-1 --silent > server.log 2>&1 &
   - sleep 5
   - echo "Server log:"
   - cat server.log
   - echo "Checking if port 8080 is open..."
   - netstat -tlnp | grep 8080 || true
+  artifacts:
+    paths:
+    - server.log
+    expire_in: 1 hour
+
+# Stage 2: Run Playwright tests
+run_tests:
+  stage: test
+  image: mcr.microsoft.com/playwright:v1.55.1-focal
+  script:
   - echo "Waiting for app to be ready at $APP_URL..."
   - npx wait-on $APP_URL --timeout 120000 --interval 2000
   - echo "Running Playwright tests..."
@@ -41,11 +50,12 @@ run_tests:
   artifacts:
     paths:
     - $REPORTS_DIR
-    - server.log
     expire_in: 1 hour
   allow_failure: false
+  needs:
+  - start_app
 
-# Stage 2: Publish HTML report
+# Stage 3: Publish HTML report
 html_report:
   stage: report
   script:
@@ -58,8 +68,10 @@ html_report:
     reports:
       junit: $REPORTS_DIR/*.xml
     expire_in: 1 hour
+  needs:
+  - run_tests
 
-# Stage 3: Security scan
+# Stage 4: Security scan
 security_scan:
   stage: security
   script:
@@ -72,7 +84,7 @@ security_scan:
     expire_in: 1 hour
   allow_failure: true
 
-# Stage 4: GitLab Duo troubleshooting
+# Stage 5: GitLab Duo troubleshooting
 duo_troubleshoot:
   stage: troubleshoot
   image:
