@@ -1,0 +1,89 @@
+# GitLab CI/CD pipeline for Playwright TODOs app
+# Stages: start -> test -> report -> security -> troubleshoot
+
+stages:
+- start
+- test
+- report
+- security
+- troubleshoot
+
+variables:
+  NODE_VERSION: "20"
+  REPORTS_DIR: "playwright-report"
+  SECURITY_REPORT: "security-report.json"
+  NODE_OPTIONS: "--openssl-legacy-provider"
+  APP_URL: "http://localhost:3000" # matches npm start (http-server -p 3000)
+
+default:
+  image: node:$NODE_VERSION
+  before_script:
+  - npm ci
+
+# Stage 1: Start app
+start_app:
+  stage: start
+  script:
+  - echo "Starting TODO app with npm start..."
+  - npm start &
+  - echo "Waiting for app to be ready at $APP_URL..."
+  - npx wait-on $APP_URL --timeout 120000 --interval 2000
+
+# Stage 2: Run Playwright tests
+run_tests:
+  stage: test
+  image: mcr.microsoft.com/playwright:v1.36.0-focal
+  script:
+  - echo "Running Playwright tests..."
+  - npx playwright test --reporter=html,junit --output $REPORTS_DIR
+  artifacts:
+    paths:
+    - $REPORTS_DIR
+    expire_in: 1 hour
+  allow_failure: false
+  needs:
+  - start_app
+
+# Stage 3: Publish HTML report
+html_report:
+  stage: report
+  script:
+  - echo "Publishing HTML reports..."
+  - mkdir -p public
+  - cp -r $REPORTS_DIR/* public/
+  artifacts:
+    paths:
+    - public
+    reports:
+      junit: $REPORTS_DIR/*.xml
+    expire_in: 1 hour
+  needs:
+  - run_tests
+
+# Stage 4: Security scan
+security_scan:
+  stage: security
+  script:
+  - echo "Running security scan..."
+  - npm audit --json > $SECURITY_REPORT || true
+  - cat $SECURITY_REPORT
+  artifacts:
+    paths:
+    - $SECURITY_REPORT
+    expire_in: 1 hour
+  allow_failure: true
+
+# Stage 5: GitLab Duo troubleshooting
+duo_troubleshoot:
+  stage: troubleshoot
+  image:
+    name: registry.gitlab.com/gitlab-org/duo-cli:latest
+    entrypoint: [ "" ]
+  script:
+  - echo "Analyzing pipeline with GitLab Duo..."
+  - duo chat "Analyze the test failures in this pipeline and suggest potential fixes" > duo-chat-output.md
+  when: on_failure
+  artifacts:
+    paths:
+    - duo-chat-output.md
+    expire_in: 1 hour

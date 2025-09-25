@@ -1,0 +1,22 @@
+// tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "CommonJS", // Or "ESNext" if you prefer, but CommonJS is common for Node environments
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    // If you're using React in your main app, you might need "jsx": "react-jsx" or "react"
+    // "jsx": "react-jsx",
+    "types": ["node", "@playwright/test"] // <<<--- THIS IS CRITICAL
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "tests/**/*.ts" // <<<--- THIS IS CRITICAL to include your test files
+  ],
+  "exclude": ["node_modules"]
+}

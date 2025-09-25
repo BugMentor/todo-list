@@ -1,0 +1,35 @@
+{
+  "name": "todo-list",
+  "version": "1.0.0",
+  "description": "Todo List app to show AI Driven Gitlab Pipeline with troubleshooting stage (Gitlab Duo).",
+  "main": "index.html",
+  "scripts": {
+    "start": "npx http-server . -p 3000",
+    "test": "npx playwright test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://gitlab.com/matiasmagni2/todo-list.git"
+  },
+  "keywords": [
+    "gitlab",
+    "duo",
+    "todoapp",
+    "todolist",
+    "todos",
+    "matias",
+    "magni",
+    "bugmentor"
+  ],
+  "author": "Matías J. Magni",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://gitlab.com/matiasmagni2/todo-list/issues"
+  },
+  "homepage": "https://gitlab.com/matiasmagni2/todo-list#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.55.1",
+    "@types/node": "^24.5.2",
+    "http-server": "^14.1.1"
+  }
+}
