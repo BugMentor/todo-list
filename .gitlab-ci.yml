@@ -1,7 +1,8 @@
 # GitLab CI/CD pipeline for Playwright TODOs app
-# Stages: test -> report -> security -> troubleshoot
+# Stages: start_app -> test -> report -> security -> troubleshoot
 
 stages:
+- start_app
 - test
 - report
 - security
@@ -12,27 +13,34 @@ variables:
   REPORTS_DIR: "playwright-report"
   SECURITY_REPORT: "security-report.json"
   NODE_OPTIONS: "--openssl-legacy-provider"
-  APP_URL: "http://localhost:8080"
+  APP_PORT: "8080"
+  APP_URL: "http://todoapp:$APP_PORT"
 
 default:
   image: node:$NODE_VERSION
   before_script:
   - npm ci
 
-# Stage 1: Run Playwright tests (includes starting the app)
+# Stage 1: Start the app as a service
+start_app:
+  stage: start_app
+  image: node:$NODE_VERSION
+  script:
+  - echo "Preparing static app service..."
+  # No need to run server here, it will be run as a service
+  services:
+  - name: node:$NODE_VERSION
+    alias: todoapp
+    command: [ "sh", "-c", "npm install -g http-server && http-server . -p $APP_PORT -c-1 --silent" ]
+  artifacts:
+    paths: []
+  allow_failure: false
+
+# Stage 2: Run Playwright tests
 run_tests:
   stage: test
   image: mcr.microsoft.com/playwright:v1.55.1-focal
   script:
-  - echo "Installing http-server..."
-  - npm install -g http-server
-  - echo "Starting TODO app..."
-  - nohup http-server . -p 8080 -c-1 --silent > server.log 2>&1 &
-  - sleep 5
-  - echo "Server log:"
-  - cat server.log
-  - echo "Testing connectivity..."
-  - curl -f $APP_URL || echo "App not responding"
   - echo "Waiting for app to be ready at $APP_URL..."
   - npx wait-on $APP_URL --timeout 300000 --interval 2000 --verbose
   - echo "Running Playwright tests..."
@@ -40,11 +48,11 @@ run_tests:
   artifacts:
     paths:
     - $REPORTS_DIR
-    - server.log
     expire_in: 1 hour
-  allow_failure: false
+  needs:
+  - start_app
 
-# Stage 2: Publish HTML report
+# Stage 3: Publish HTML report
 html_report:
   stage: report
   script:
@@ -60,7 +68,7 @@ html_report:
   needs:
   - run_tests
 
-# Stage 3: Security scan
+# Stage 4: Security scan
 security_scan:
   stage: security
   script:
@@ -73,7 +81,7 @@ security_scan:
     expire_in: 1 hour
   allow_failure: true
 
-# Stage 4: GitLab Duo troubleshooting
+# Stage 5: GitLab Duo troubleshooting
 duo_troubleshoot:
   stage: troubleshoot
   image:
