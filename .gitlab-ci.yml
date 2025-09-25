@@ -27,7 +27,7 @@ build:
 # Test stage with specific image
 test:
   stage: test
-  image: mcr.microsoft.com/playwright:latest # Pre-installed browsers
+  image: mcr.microsoft.com/playwright:v1.55.1 # Pre-installed browsers
   script:
   - echo "Running tests..."
   - npm install # Still need to install your project dependencies
