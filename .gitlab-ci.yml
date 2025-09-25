@@ -1,75 +1,40 @@
-# GitLab CI/CD pipeline for Playwright TODOs app
-# Improved workflow: test → report → security → troubleshoot
-
 stages:
+- build
 - test
-- report
 - security
 - troubleshoot
+- deploy
 
 variables:
-  NODE_VERSION: "20"
-  REPORTS_DIR: "playwright-report"
-  SECURITY_REPORT: "security-report.json"
-  NODE_OPTIONS: "--openssl-legacy-provider"
-  APP_URL: "http://localhost:8080"
+  SECURITY_REPORT: security-report.json
 
-# Global defaults
-default:
-  image: node:${NODE_VERSION}-slim
-  before_script:
-  - npm ci --quiet
-  cache:
-    key: ${CI_COMMIT_REF_SLUG}
+# Build stage
+build:
+  stage: build
+  script:
+  - echo "Building the application..."
+  - npm install
+  artifacts:
     paths:
     - node_modules/
-
-# Stage 1: Run Playwright tests
-run_tests:
-  stage: test
-  image: mcr.microsoft.com/playwright:v1.55.1
-  script:
-  - npm install -g http-server
-  - echo "Starting TODO app in background..."
-  - nohup http-server . -p 8080 -c-1 --silent > server.log 2>&1 &
-  - echo "Waiting for app to be ready at ${APP_URL}..."
-  - npx wait-on ${APP_URL} --timeout 60000 --interval 1000
-  - echo "Running Playwright tests..."
-  - npx playwright test --reporter=html,junit --output ${REPORTS_DIR}
-  artifacts:
-    when: always
-    paths:
-    - ${REPORTS_DIR}
-    - server.log
-    reports:
-      junit: ${REPORTS_DIR}/*.xml
-    expire_in: 1 week
-  retry:
-    max: 1
-    when: runner_system_failure
-
-# Stage 2: Publish HTML report
-html_report:
-  stage: report
-  script:
-  - echo "Publishing HTML reports..."
-  - mkdir -p public
-  - cp -r ${REPORTS_DIR}/* public/ || echo "No reports found to publish"
-  artifacts:
-    paths:
-    - public
-    expire_in: 1 week
-  needs:
-  - job: run_tests
-    artifacts: true
-    optional: true # This makes the job run even if run_tests fails
+    expire_in: 1 day
   rules:
-  - when: always # This makes the job run in all cases
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
-# Stage 3: Security scan
+# Test stage
+test:
+  stage: test
+  script:
+  - echo "Running tests..."
+  - npm test
+  rules:
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Security stage
 security_scan:
   stage: security
   script:
+  - apt-get update && apt-get install -y jq
   - echo "Running security scan..."
   - npm audit --json > ${SECURITY_REPORT} || true
   - if [ -s "${SECURITY_REPORT}" ]; then echo "Security report generated successfully"; jq . ${SECURITY_REPORT} | head -n 20; else echo "No vulnerabilities found or report generation failed"; fi
@@ -81,18 +46,23 @@ security_scan:
   rules:
   - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
-# Stage 4: GitLab Duo troubleshooting
+# Troubleshoot stage - will always run after security
 duo_troubleshoot:
   stage: troubleshoot
-  image:
-    name: registry.gitlab.com/gitlab-org/duo-cli:latest
-    entrypoint: [ "" ]
+  needs:
+  - job: security_scan
+    optional: true # This ensures it runs even if security_scan fails
   script:
-  - duo chat "Analyze the test failures in this pipeline and suggest potential fixes" > duo-chat-output.md
-  when: on_failure
-  artifacts:
-    paths:
-    - duo-chat-output.md
-    expire_in: 1 week
+  - echo "Running troubleshooting steps..."
+  - if [ -f "${SECURITY_REPORT}" ]; then echo "Analyzing security report..."; cat ${SECURITY_REPORT} | grep -i vulnerability || echo "No vulnerabilities found"; else echo "No security report found"; fi
   rules:
   - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    when: always # This ensures it always runs when the conditions are met
+
+# Deploy stage
+deploy:
+  stage: deploy
+  script:
+  - echo "Deploying application..."
+  rules:
+  - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

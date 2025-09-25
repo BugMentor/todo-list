@@ -5,14 +5,14 @@ test.beforeEach(async ({ page }) => {
   await page.waitForLoadState("networkidle"); // Wait for the network to be idle
 });
 
-test("should allow me to add todo items", async ({ page }) => {
+test("Should allow me to add todo items", async ({ page }) => {
   const newTodo = page.getByPlaceholder("Add a todo . . .");
   await newTodo.fill("buy some cheese");
   await newTodo.press("Enter");
   await expect(page.getByText("buy some cheese")).toBeVisible();
 });
 
-test("should allow me to complete a todo item", async ({ page }) => {
+test("Should allow me to complete a todo item", async ({ page }) => {
   const newTodo = page.getByPlaceholder("Add a todo . . .");
   await newTodo.fill("buy some cheese");
   await newTodo.press("Enter");
@@ -35,7 +35,7 @@ test("should allow me to complete a todo item", async ({ page }) => {
   ).not.toBeVisible();
 });
 
-test("should allow me to clear completed todos", async ({ page }) => {
+test("Should allow me to clear completed todos", async ({ page }) => {
   const newTodo = page.getByPlaceholder("Add a todo . . .");
   await newTodo.fill("buy some cheese");
   await newTodo.press("Enter");
@@ -65,7 +65,7 @@ test("should allow me to clear completed todos", async ({ page }) => {
   await expect(page.getByText("drink some milk")).toBeVisible();
 });
 
-test("should allow me to filter todos", async ({ page }) => {
+test("Should allow me to filter todos", async ({ page }) => {
   const newTodo = page.getByPlaceholder("Add a todo . . .");
   await newTodo.fill("buy some cheese");
   await newTodo.press("Enter");
