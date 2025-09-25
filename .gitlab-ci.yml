@@ -1,5 +1,5 @@
 # GitLab CI/CD pipeline for Playwright TODOs app
-# Stages: test -> report -> security -> troubleshoot
+# Improved workflow: test → report → security → troubleshoot
 
 stages:
 - test
@@ -14,35 +14,39 @@ variables:
   NODE_OPTIONS: "--openssl-legacy-provider"
   APP_URL: "http://localhost:8080"
 
+# Global defaults
 default:
-  image: node:$NODE_VERSION
+  image: node:${NODE_VERSION}-slim
   before_script:
-  - npm ci
+  - npm ci --quiet
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+    - node_modules/
 
-# Stage 1: Run Playwright tests (includes starting the app)
+# Stage 1: Run Playwright tests
 run_tests:
   stage: test
   image: mcr.microsoft.com/playwright:v1.55.1
   script:
-  - echo "Installing http-server..."
   - npm install -g http-server
-  - echo "Starting TODO app..."
+  - echo "Starting TODO app in background..."
   - nohup http-server . -p 8080 -c-1 --silent > server.log 2>&1 &
-  - sleep 5
-  - echo "Server log:"
-  - cat server.log
-  - echo "Testing connectivity..."
-  - curl -f $APP_URL || echo "App not responding"
-  - echo "Waiting for app to be ready at $APP_URL..."
-  - npx wait-on $APP_URL --timeout 300000 --interval 2000 --verbose
+  - echo "Waiting for app to be ready at ${APP_URL}..."
+  - npx wait-on ${APP_URL} --timeout 60000 --interval 1000
   - echo "Running Playwright tests..."
-  - npx playwright test --reporter=html,junit --output $REPORTS_DIR
+  - npx playwright test --reporter=html,junit --output ${REPORTS_DIR}
   artifacts:
+    when: always
     paths:
-    - $REPORTS_DIR
+    - ${REPORTS_DIR}
     - server.log
-    expire_in: 1 hour
-  allow_failure: false
+    reports:
+      junit: ${REPORTS_DIR}/*.xml
+    expire_in: 1 week
+  retry:
+    max: 1
+    when: runner_system_failure
 
 # Stage 2: Publish HTML report
 html_report:
@@ -50,28 +54,34 @@ html_report:
   script:
   - echo "Publishing HTML reports..."
   - mkdir -p public
-  - cp -r $REPORTS_DIR/* public/
+  - cp -r ${REPORTS_DIR}/* public/ || echo "No reports found to publish"
   artifacts:
     paths:
     - public
-    reports:
-      junit: $REPORTS_DIR/*.xml
-    expire_in: 1 hour
+    expire_in: 1 week
   needs:
-  - run_tests
+  - job: run_tests
+    artifacts: true
+  rules:
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    when: on_success
+  - when: manual
+    allow_failure: true
 
 # Stage 3: Security scan
 security_scan:
   stage: security
   script:
   - echo "Running security scan..."
-  - npm audit --json > $SECURITY_REPORT || true
-  - cat $SECURITY_REPORT
+  - npm audit --json > ${SECURITY_REPORT} || true
+  - if [ -s "${SECURITY_REPORT}" ]; then echo "Security report generated successfully"; jq . ${SECURITY_REPORT} | head -n 20; else echo "No vulnerabilities found or report generation failed"; fi
   artifacts:
     paths:
-    - $SECURITY_REPORT
-    expire_in: 1 hour
+    - ${SECURITY_REPORT}
+    expire_in: 1 week
   allow_failure: true
+  rules:
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 # Stage 4: GitLab Duo troubleshooting
 duo_troubleshoot:
@@ -80,9 +90,11 @@ duo_troubleshoot:
     name: registry.gitlab.com/gitlab-org/duo-cli:latest
     entrypoint: [ "" ]
   script:
-  - duo chat "Analyze the test failures in this pipeline and suggest potential fixes"
+  - duo chat "Analyze the test failures in this pipeline and suggest potential fixes" > duo-chat-output.md
   when: on_failure
   artifacts:
     paths:
     - duo-chat-output.md
-    expire_in: 1 hour
+    expire_in: 1 week
+  rules:
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

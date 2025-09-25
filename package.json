@@ -4,7 +4,7 @@
   "description": "Todo List app to show AI Driven Gitlab Pipeline with troubleshooting stage (Gitlab Duo).",
   "main": "index.html",
   "scripts": {
-    "start": "npx http-server . -p 3000",
+    "start": "npx http-server ./ -p 3000",
     "test": "npx playwright test"
   },
   "repository": {
