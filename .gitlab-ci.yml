@@ -24,11 +24,13 @@ build:
   rules:
   - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
-# Test stage
+# Test stage with specific image
 test:
   stage: test
+  image: mcr.microsoft.com/playwright:latest # Pre-installed browsers
   script:
   - echo "Running tests..."
+  - npm install # Still need to install your project dependencies
   - npm test
   rules:
   - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
