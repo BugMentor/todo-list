@@ -172,7 +172,7 @@ generate_troubleshooting_report:
   - echo "--- Generating HTML Troubleshooting Report ---"
   - apt-get update && apt-get install -y jq curl
   - chmod +x scripts/troubleshoot_html_reporter.sh
-  - scripts/troubleshoot_html_reporter.sh "${PLAYWRIGHT_REPORTS_DIR}" "${CI_PROJECT_DIR}" "${CI_PIPELINE_ID}" "${CI_COMMIT_BRANCH}" "${NODE_ENV:-development}"
+  - scripts/troubleshoot_html_reporter.sh "${PLAYWRIGHT_REPORTS_DIR}" "${CI_PROJECT_DIR}" "${CI_PIPELINE_ID}" "${CI_COMMIT_BRANCH}" "${NODE_ENV:-development}" "" "${SECURITY_REPORT_FILE}"
   - echo "--- HTML Troubleshooting Report Generated ---"
   artifacts:
     when: always
