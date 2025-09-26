@@ -1,4 +1,7 @@
 # Base configuration
+include:
+- template: Security/SAST.gitlab-ci.yml
+
 image: node:22
 
 stages:
@@ -6,7 +9,7 @@ stages:
 - test
 - security
 - analyze
-- report # New stage for HTML report generation
+- report
 - deploy
 
 variables:
@@ -15,7 +18,10 @@ variables:
   SECURITY_REPORT_FILE: security-report.json
   ANALYSIS_OUTPUT_FILE: analysis_results.json
   PYTHON_ANALYZER_SCRIPT: scripts/duo_troubleshoot_analyzer.py
-  TROUBLESHOOT_REPORT_FILE: troubleshooting-report.html # New variable
+  TROUBLESHOOT_REPORT_FILE: troubleshooting-report.html
+  SAST_EXCLUDED_PATHS: "node_modules, dist, coverage, playwright-report"
+  SAST_ANALYZER_IMAGE_TAG: 3
+  SCAN_KUBERNETES_MANIFESTS: "false"
 
 # Shared pipeline rules
 .default_rules: &default_rules
@@ -42,13 +48,13 @@ test:
   stage: test
   image: mcr.microsoft.com/playwright:v1.55.1
   cache:
-    key: ${CI_COMMIT_REF_SLUG} # Improved cache key
+    key: ${CI_COMMIT_REF_SLUG}
     paths:
     - node_modules/
   script:
   - echo "--- Test Job Setup ---"
   - npm ci
-  - npm install -g http-server wait-on # Ensure wait-on is installed
+  - npm install -g http-server wait-on
 
   # Start the server in background
   - nohup http-server . -p 8080 -c-1 --silent > "${SERVER_LOG_FILE}" 2>&1 &
@@ -79,7 +85,7 @@ test:
     reports:
       junit: ${PLAYWRIGHT_REPORTS_DIR}/junit.xml
   retry:
-    max: 1 # Reduced retry count
+    max: 1
     when:
     - script_failure
   <<: *default_rules
@@ -100,7 +106,15 @@ collect_playwright_html_report:
   <<: *default_rules
   when: on_success
 
-# Security scanning
+# Node.js SAST scanning
+nodejs-scan-sast:
+  stage: security
+  needs:
+  - build
+  artifacts:
+    reports:
+      sast: gl-sast-report.json
+
 security_scan:
   stage: security
   needs:
@@ -112,13 +126,35 @@ security_scan:
   - |
     if [ -s "${SECURITY_REPORT_FILE}" ]; then
       echo "Security report generated successfully"
-      jq . "${SECURITY_REPORT_FILE}" | head -n 20
+      CRITICAL=$(jq '.vulnerabilities | map(select(.severity == "critical")) | length' "${SECURITY_REPORT_FILE}" 2>/dev/null || echo 0)
+      HIGH=$(jq '.vulnerabilities | map(select(.severity == "high")) | length' "${SECURITY_REPORT_FILE}" 2>/dev/null || echo 0)
+      MEDIUM=$(jq '.vulnerabilities | map(select(.severity == "moderate")) | length' "${SECURITY_REPORT_FILE}" 2>/dev/null || echo 0)
+      LOW=$(jq '.vulnerabilities | map(select(.severity == "low")) | length' "${SECURITY_REPORT_FILE}" 2>/dev/null || echo 0)
+      TOTAL=$((CRITICAL + HIGH + MEDIUM + LOW))
+      echo "Security Scan Summary:"
+      echo "Critical: ${CRITICAL}"
+      echo "High:     ${HIGH}"
+      echo "Medium:   ${MEDIUM}"
+      echo "Low:      ${LOW}"
+      echo "Total:    ${TOTAL}"
+      if [ $((CRITICAL + HIGH)) -gt 0 ]; then
+        echo "Critical and High Vulnerabilities:"
+        jq -r '.vulnerabilities | to_entries | map(select(.value.severity == "critical" or .value.severity == "high")) | .[0:5] | map("- " + .key + ": " + .value.severity + " severity, " + (.value.via[0].title // "No title")) | .[]' "${SECURITY_REPORT_FILE}"
+        if [ "${CRITICAL}" -gt 0 ]; then
+          echo "Critical vulnerabilities found! Pipeline will fail."
+          exit 1
+        fi
+      else
+        echo "No critical or high vulnerabilities found."
+      fi
     else
       echo "No vulnerabilities found or report generation failed"
     fi
   artifacts:
     paths:
     - ${SECURITY_REPORT_FILE}
+    reports:
+      dependency_scanning: ${SECURITY_REPORT_FILE} # ✅ Valid GitLab type
     expire_in: 1 week
   allow_failure: true
   <<: *default_rules
@@ -136,7 +172,7 @@ analyze_results:
   script:
   - echo "--- Running analysis script ---"
   - pip install --no-cache-dir --upgrade pip
-  - pip install requests # Added to fix the ModuleNotFoundError
+  - pip install requests
   - CI_LOG_PLACEHOLDER="GitLab CI log content from test job (placeholder)"
   - |
     python3 "${PYTHON_ANALYZER_SCRIPT}" \
@@ -168,11 +204,14 @@ generate_troubleshooting_report:
   - job: analyze_results
     artifacts: true
     optional: true
+  - job: nodejs-scan-sast
+    artifacts: true
+    optional: true
   script:
   - echo "--- Generating HTML Troubleshooting Report ---"
   - apt-get update && apt-get install -y jq curl
   - chmod +x scripts/troubleshoot_html_reporter.sh
-  - scripts/troubleshoot_html_reporter.sh "${PLAYWRIGHT_REPORTS_DIR}" "${CI_PROJECT_DIR}" "${CI_PIPELINE_ID}" "${CI_COMMIT_BRANCH}" "${NODE_ENV:-development}" "" "${SECURITY_REPORT_FILE}"
+  - scripts/troubleshoot_html_reporter.sh "${PLAYWRIGHT_REPORTS_DIR}" "${CI_PROJECT_DIR}" "${CI_PIPELINE_ID}" "${CI_COMMIT_BRANCH}" "${NODE_ENV:-development}" "" "${SECURITY_REPORT_FILE}" "gl-sast-report.json"
   - echo "--- HTML Troubleshooting Report Generated ---"
   artifacts:
     when: always
