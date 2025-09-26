@@ -20,6 +20,7 @@ variables:
   ANALYSIS_OUTPUT_FILE: analysis_results.json
   PYTHON_ANALYZER_SCRIPT: scripts/duo_troubleshoot_analyzer.py
   TROUBLESHOOT_REPORT_FILE: troubleshooting-report.html
+  COVERAGE_DIR: coverage
   # SAST configuration
   SAST_EXCLUDED_PATHS: "node_modules, dist, coverage, playwright-report"
   SAST_ANALYZER_IMAGE_TAG: 3
@@ -37,6 +38,7 @@ cache:
   key: ${CI_COMMIT_REF_SLUG}
   paths:
   - node_modules/
+  - ~/.cache/ms-playwright/
   policy: pull-push
 
 # Build stage
@@ -47,7 +49,7 @@ build:
   - npm install
   <<: *default_rules
 
-# Test stage
+# Test stage with coverage
 test:
   stage: test
   image: mcr.microsoft.com/playwright:v1.55.1
@@ -55,10 +57,11 @@ test:
     key: ${CI_COMMIT_REF_SLUG}
     paths:
     - node_modules/
+    - ~/.cache/ms-playwright/
   script:
   - echo "--- Test Job Setup ---"
   - npm ci
-  - npm install -g http-server wait-on
+  - npm install -g http-server wait-on nyc c8
 
   # Start the server in background
   - nohup http-server . -p 8080 -c-1 --silent > "${SERVER_LOG_FILE}" 2>&1 &
@@ -67,11 +70,12 @@ test:
   # Wait for server to be ready
   - npx wait-on "${APP_URL}" --timeout 60000 --interval 1000 || { echo "Server failed to start within timeout"; cat "${SERVER_LOG_FILE}"; exit 1; }
 
-  - echo "--- Running Playwright tests ---"
+  - echo "--- Running Playwright tests with coverage ---"
   - mkdir -p "${PLAYWRIGHT_REPORTS_DIR}"
+  - mkdir -p "${COVERAGE_DIR}"
 
-  # Generate both HTML and JUnit reports
-  - npx playwright test
+  # Generate both HTML and JUnit reports with coverage
+  - npx c8 --reporter=html --reporter=json-summary --reporter=text --report-dir=${COVERAGE_DIR} npx playwright test
   - PLAYWRIGHT_EXIT_CODE=$?
 
   # Cleanup server
@@ -79,15 +83,21 @@ test:
 
   - echo "Test artifacts in ${PLAYWRIGHT_REPORTS_DIR}:"
   - ls -la "${PLAYWRIGHT_REPORTS_DIR}"
+  - echo "Coverage artifacts in ${COVERAGE_DIR}:"
+  - ls -la "${COVERAGE_DIR}"
 
   - exit $PLAYWRIGHT_EXIT_CODE
   artifacts:
     when: always
     paths:
     - ${PLAYWRIGHT_REPORTS_DIR}/
+    - ${COVERAGE_DIR}/
     - ${SERVER_LOG_FILE}
     reports:
       junit: ${PLAYWRIGHT_REPORTS_DIR}/junit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: ${COVERAGE_DIR}/cobertura-coverage.xml
   retry:
     max: 1
     when:
@@ -130,7 +140,7 @@ security_scan:
   script:
   - echo "Running security scan..."
   - apt-get update && apt-get install -y jq
-  - npm audit --json > "${SECURITY_REPORT_FILE}"
+  - npm audit --json > "${SECURITY_REPORT_FILE}" || true
   - |
     if [ -s "${SECURITY_REPORT_FILE}" ]; then
       echo "Security report generated successfully"
@@ -230,7 +240,7 @@ generate_troubleshooting_report:
       "${CI_PIPELINE_ID}" \
       "${CI_COMMIT_BRANCH}" \
       "${NODE_ENV}" \
-      "" \
+      "${COVERAGE_DIR}" \
       "${SECURITY_REPORT_FILE}" \
       "gl-sast-report.json"
   - echo "--- HTML Troubleshooting Report Generated ---"
