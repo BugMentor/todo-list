@@ -39,46 +39,47 @@ build:
 test:
   stage: test
   image: mcr.microsoft.com/playwright:v1.55.1
-  needs:
-  - build
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHA}
+    paths:
+    - node_modules/
   script:
   - echo "--- Test Job Setup ---"
   - npm ci
-  - npm install -g http-server || echo "http-server already installed"
+  - npm install -g http-server
 
-  # Start server in background
+  # Start the server in background
   - nohup http-server . -p 8080 -c-1 --silent > "${SERVER_LOG_FILE}" 2>&1 &
   - export APP_URL="http://localhost:8080"
 
   # Wait for server to be ready
-  - |
-    npx wait-on "${APP_URL}" --timeout 60000 --interval 1000 || {
-      echo "ERROR: Server failed to start or become ready."
-      echo "--- Server Log Contents ---"
-      cat "${SERVER_LOG_FILE}"
-      echo "-------------------------"
-      exit 1
-    }
+  - npx wait-on "${APP_URL}" --timeout 60000 --interval 1000 || { echo "Server failed to start within timeout"; cat "${SERVER_LOG_FILE}"; exit 1; }
 
-  # Run tests
   - echo "--- Running Playwright tests ---"
   - mkdir -p "${PLAYWRIGHT_REPORTS_DIR}"
-  # Fixed command: Using proper reporter syntax for JUnit
-  - npx playwright test --reporter=html --reporter=junit --output=${PLAYWRIGHT_REPORTS_DIR}/junit.xml
+
+  # Generate both HTML and JUnit reports
+  - npx playwright test --reporter=html --reporter=junit:${PLAYWRIGHT_REPORTS_DIR}/junit.xml
   - PLAYWRIGHT_EXIT_CODE=$?
 
-  # Cleanup
+  # Cleanup server
   - pkill -f "http-server" || true
+
   - echo "Test artifacts in ${PLAYWRIGHT_REPORTS_DIR}:"
   - ls -la "${PLAYWRIGHT_REPORTS_DIR}"
+
   - exit $PLAYWRIGHT_EXIT_CODE
   artifacts:
     when: always
     paths:
-    - "${PLAYWRIGHT_REPORTS_DIR}/"
-    - "${SERVER_LOG_FILE}"
+    - ${PLAYWRIGHT_REPORTS_DIR}/
+    - ${SERVER_LOG_FILE}
     reports:
-      junit: "${PLAYWRIGHT_REPORTS_DIR}/junit.xml"
+      junit: ${PLAYWRIGHT_REPORTS_DIR}/junit.xml
+  retry:
+    max: 2
+    when:
+    - script_failure
   <<: *default_rules
 
 # HTML Report generation
@@ -90,13 +91,11 @@ html_report:
   script:
   - echo "Processing HTML report from ${PLAYWRIGHT_REPORTS_DIR}..."
   - ls -la "${PLAYWRIGHT_REPORTS_DIR}"
-  # Add any additional report processing here if needed
   artifacts:
     paths:
-    - "${PLAYWRIGHT_REPORTS_DIR}/"
+    - ${PLAYWRIGHT_REPORTS_DIR}/
     expire_in: 1 week
   <<: *default_rules
-  # Add explicit condition to ensure this job runs only when test succeeds
   when: on_success
 
 # Security scanning
@@ -117,7 +116,7 @@ security_scan:
     fi
   artifacts:
     paths:
-    - "${SECURITY_REPORT_FILE}"
+    - ${SECURITY_REPORT_FILE}
     expire_in: 1 week
   allow_failure: true
   <<: *default_rules
@@ -149,7 +148,7 @@ analyze_results:
   - cat "${ANALYSIS_OUTPUT_FILE}"
   artifacts:
     paths:
-    - "${ANALYSIS_OUTPUT_FILE}"
+    - ${ANALYSIS_OUTPUT_FILE}
     expire_in: 1 day
   <<: *default_rules
   when: always
