@@ -4,7 +4,7 @@ set -euo pipefail
 # Usage:
 # scripts/troubleshoot_html_reporter.sh \
 #   <REPORTS_DIR> <CI_PROJECT_DIR> <PIPELINE_ID> <BRANCH> <NODE_ENV> \
-#   <COVERAGE_DIR> <SECURITY_REPORT_FILE> <SAST_REPORT_FILE> <ANALYSIS_JSON>
+#   <COVERAGE_DIR> <SECURITY_REPORT_FILE> <ANALYSIS_JSON> <TEST_RUN_TIME>
 
 REPORTS_DIR="${1:-playwright-report}"
 CI_PROJECT_DIR="${2:-.}"
@@ -13,8 +13,8 @@ BRANCH="${4:-N/A}"
 NODE_ENV="${5:-N/A}"
 COVERAGE_DIR="${6:-coverage}"
 SECURITY_REPORT_FILE="${7:-}"
-SAST_REPORT_FILE="${8:-}"
-ANALYSIS_JSON="${9:-}"
+ANALYSIS_JSON="${8:-}"
+TEST_RUN_TIME="${9:-N/A}"
 
 OUTPUT_FILE="${CI_PROJECT_DIR}/troubleshooting-report.html"
 TEMP_FILE="$(mktemp)"
@@ -82,6 +82,7 @@ security_summary_html() {
   fi
 
   local total=0 critical=0 high=0 moderate=0 low=0 summary_html="" top_list=""
+
   if jq -e '.metadata.vulnerabilities' "$file" >/dev/null 2>&1; then
     total=$(jq -r '.metadata.vulnerabilities.total // 0' "$file" 2>/dev/null || echo 0)
     critical=$(jq -r '.metadata.vulnerabilities.critical // 0' "$file" 2>/dev/null || echo 0)
@@ -95,7 +96,7 @@ security_summary_html() {
     low=$(jq -r '(.vulnerabilities // {}) | (if type=="object" then to_entries | map(.value.severity) else map(.severity) end) | map(select(.=="low")) | length' "$file" 2>/dev/null || echo 0)
     total=$((critical + high + moderate + low))
   else
-    summary_html="<pre>$(html_escape "$(jq -r . "$file" 2>/dev/null || cat "$file" | html_escape)")</pre>"
+    summary_html="<pre>$(html_escape "$(jq -r . "$file" 2>/dev/null || cat "$file")")</pre>"
   fi
 
   if [ -z "$summary_html" ]; then
@@ -113,7 +114,7 @@ security_summary_html() {
     fi
   fi
 
-  echo "$summary_html"
+  printf '%s\n' "$summary_html"
 }
 
 # --- Duo recommendations ---------------------------------------------------
@@ -139,9 +140,9 @@ extract_duo_recommendations_html() {
 
 check_coverage_reports() {
   local covdir="$1"
-  local covhtml covsum
+  local covhtml
   covhtml="<p>No coverage directory found at: $(html_escape "$covdir")</p>"
-  covsum="<p><strong>⚠️ No coverage reports available</strong></p>"
+  local covsum="<p><strong>⚠️ No coverage reports available</strong></p>"
 
   if [ -n "$covdir" ] && [ -d "$covdir" ]; then
     local files
@@ -177,38 +178,23 @@ OS_INFO=$(uname -a 2>/dev/null || echo "Unknown")
 
 read -r COVERAGE_HTML COVERAGE_SUMMARY < <(check_coverage_reports "$COVERAGE_DIR")
 SECURITY_HTML=$(security_summary_html "$SECURITY_REPORT_FILE")
-
-# --- SAST -------------------------------------------------------------------
-SAST_HTML="<p>No SAST report available.</p>"
-if [ -n "$SAST_REPORT_FILE" ] && [ -f "$SAST_REPORT_FILE" ]; then
-  if command -v jq >/dev/null 2>&1 && jq -e '.vulnerabilities' "$SAST_REPORT_FILE" >/dev/null 2>&1; then
-    s_count=$(jq '.vulnerabilities | length' "$SAST_REPORT_FILE" 2>/dev/null || echo 0)
-    SAST_HTML="<p><strong>SAST vulnerabilities:</strong> ${s_count}</p>"
-  else
-    SAST_HTML="<p>SAST report found but could not parse details.</p>"
-  fi
-fi
-
-# --- Duo --------------------------------------------------------------------
 DUO_HTML=$(extract_duo_recommendations_html "$ANALYSIS_JSON")
-if [ -z "$DUO_HTML" ]; then
-  fallback_html="<ul>"
-  [ "$FAILS" -gt 0 ] || [ "$ERRORS" -gt 0 ] && fallback_html+="<li>Investigate failing tests and check Playwright logs/artifacts.</li>"
-
-  if [ -n "$SECURITY_REPORT_FILE" ] && [ -f "$SECURITY_REPORT_FILE" ] && command -v jq >/dev/null 2>&1; then
-    CRIT_COUNT=$(jq -r '(.vulnerabilities // {}) | ( if type=="object" then to_entries | map(.value.severity) else map(.severity) end ) | map(select(.=="critical")) | length' "$SECURITY_REPORT_FILE" 2>/dev/null || echo 0)
-    HIGH_COUNT=$(jq -r '(.vulnerabilities // {}) | ( if type=="object" then to_entries | map(.value.severity) else map(.severity) end ) | map(select(.=="high")) | length' "$SECURITY_REPORT_FILE" 2>/dev/null || echo 0)
-    [ "$CRIT_COUNT" -gt 0 ] && fallback_html+="<li>Critical vulnerabilities detected: ${CRIT_COUNT}. Prioritize fixing or blocking releases.</li>"
-    [ "$CRIT_COUNT" -eq 0 ] && [ "$HIGH_COUNT" -gt 0 ] && fallback_html+="<li>High-severity vulnerabilities detected: ${HIGH_COUNT}. Schedule remediation.</li>"
-  fi
-
-  pct=$(printf '%s\n' "$COVERAGE_SUMMARY" | sed -n 's/.*\([0-9]\+\)%.*$/\1/p' | head -n1 || echo "")
-  [ -n "$pct" ] && [ "$pct" -lt 80 ] 2>/dev/null && fallback_html+="<li>Coverage is ${pct}%. Consider increasing test coverage (target >= 80%).</li>"
-  fallback_html+="<li><em>These suggestions are fallback-generated because no Duo analyzer recommendations were found.</em></li></ul>"
-  DUO_HTML="$fallback_html"
-fi
-
 DISK_SPACE=$(df -h | grep -v "tmpfs" || echo "Unable to query disk space")
+
+# --- format test run time ---------------------------------------------------
+
+TEST_TIME_HTML=""
+if [ "$TEST_RUN_TIME" != "N/A" ]; then
+  if [ "$TEST_RUN_TIME" -ge 60 ]; then
+    MINS=$((TEST_RUN_TIME / 60))
+    SECS=$((TEST_RUN_TIME % 60))
+    TEST_TIME_HTML="<p><strong>Test run time:</strong> ${MINS}m ${SECS}s</p>"
+  else
+    TEST_TIME_HTML="<p><strong>Test run time:</strong> ${TEST_RUN_TIME}s</p>"
+  fi
+else
+  TEST_TIME_HTML="<p><strong>Test run time:</strong> Not available</p>"
+fi
 
 # --- render HTML ------------------------------------------------------------
 
@@ -253,11 +239,14 @@ ul{margin:6px 0 0 18px}
 <li><strong>Errors:</strong> ${ERRORS}</li>
 <li><strong>Skipped:</strong> ${SKIPPED}</li>
 </ul>
+$TEST_TIME_HTML
 EOF
 
-[ -f "${REPORTS_DIR}/index.html" ] && printf '      <p><strong>Playwright report:</strong> %s/index.html</p>\n' "$(html_escape "$REPORTS_DIR")" >> "$TEMP_FILE"
+[ -f "${REPORTS_DIR}/index.html" ] && printf '<p><strong>Playwright report:</strong> %s/index.html</p>\n' "$(html_escape "$REPORTS_DIR")" >> "$TEMP_FILE"
 
 cat >> "$TEMP_FILE" <<EOF
+</div>
+
 <div class="card">
 <h2>Coverage</h2>
 ${COVERAGE_HTML}
@@ -267,11 +256,6 @@ ${COVERAGE_SUMMARY}
 <div class="card">
 <h2>Security scan</h2>
 ${SECURITY_HTML}
-</div>
-
-<div class="card">
-<h2>SAST</h2>
-${SAST_HTML}
 </div>
 
 <div class="card">

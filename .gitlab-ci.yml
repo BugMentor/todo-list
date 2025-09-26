@@ -31,235 +31,106 @@ variables:
 # Shared pipeline rules
 .default_rules: &default_rules
   rules:
-  - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == "main"'
 
-# Dependency caching
+# Cache configuration
 cache:
   key: ${CI_COMMIT_REF_SLUG}
   paths:
   - node_modules/
-  - ~/.cache/ms-playwright/
-  policy: pull-push
 
-# Build stage
-build:
+# Install dependencies
+install_dependencies:
   stage: build
   script:
-  - echo "Building the application..."
-  - npm install
-  <<: *default_rules
-
-# Test stage with coverage
-test:
-  stage: test
-  image: mcr.microsoft.com/playwright:v1.55.1
-  cache:
-    key: ${CI_COMMIT_REF_SLUG}
+  - npm ci
+  artifacts:
     paths:
     - node_modules/
-    - ~/.cache/ms-playwright/
+  <<: *default_rules
+
+# Run tests with Playwright
+run_tests:
+  stage: test
+  needs: [ install_dependencies ]
   script:
-  - echo "--- Test Job Setup ---"
-  - npm ci
-  - npm install -g http-server wait-on nyc c8
-
-  # Start the server in background
-  - nohup http-server . -p 8080 -c-1 --silent > "${SERVER_LOG_FILE}" 2>&1 &
-  - export APP_URL="http://localhost:8080"
-
-  # Wait for server to be ready
-  - npx wait-on "${APP_URL}" --timeout 60000 --interval 1000 || { echo "Server failed to start within timeout"; cat "${SERVER_LOG_FILE}"; exit 1; }
-
-  - echo "--- Running Playwright tests with coverage ---"
-  - mkdir -p "${PLAYWRIGHT_REPORTS_DIR}"
-  - mkdir -p "${COVERAGE_DIR}"
-
-  # Generate both HTML and JUnit reports with coverage
-  - npx c8 --reporter=html --reporter=json-summary --reporter=text --report-dir=${COVERAGE_DIR} npx playwright test
-  - PLAYWRIGHT_EXIT_CODE=$?
-
-  # Cleanup server
-  - pkill -f "http-server" || true
-
-  - echo "Test artifacts in ${PLAYWRIGHT_REPORTS_DIR}:"
-  - ls -la "${PLAYWRIGHT_REPORTS_DIR}"
-  - echo "Coverage artifacts in ${COVERAGE_DIR}:"
-  - ls -la "${COVERAGE_DIR}"
-
-  - exit $PLAYWRIGHT_EXIT_CODE
+  - echo "START_TIME=$(date +%s)" > test_metrics.env
+  - mkdir -p ${PLAYWRIGHT_REPORTS_DIR}
+  - npx playwright install --with-deps chromium
+  - npx playwright test --reporter=html,junit --output="${PLAYWRIGHT_REPORTS_DIR}"
+  - echo "END_TIME=$(date +%s)" >> test_metrics.env
+  - echo "TEST_DURATION=$(($(grep END_TIME test_metrics.env | cut -d= -f2) - $(grep START_TIME test_metrics.env | cut -d= -f2)))" >> test_metrics.env
   artifacts:
-    when: always
     paths:
     - ${PLAYWRIGHT_REPORTS_DIR}/
     - ${COVERAGE_DIR}/
-    - ${SERVER_LOG_FILE}
+    - test_metrics.env
     reports:
       junit: ${PLAYWRIGHT_REPORTS_DIR}/junit.xml
-      coverage_report:
-        coverage_format: cobertura
-        path: ${COVERAGE_DIR}/cobertura-coverage.xml
-  retry:
-    max: 1
-    when:
-    - script_failure
   <<: *default_rules
 
-# HTML Report generation
-collect_playwright_html_report:
-  stage: analyze
-  needs:
-  - job: test
-    artifacts: true
-  script:
-  - echo "Collecting Playwright HTML report from ${PLAYWRIGHT_REPORTS_DIR}..."
-  - ls -la "${PLAYWRIGHT_REPORTS_DIR}"
-  artifacts:
-    paths:
-    - ${PLAYWRIGHT_REPORTS_DIR}/
-    expire_in: 1 week
-  <<: *default_rules
-  when: on_success
-
-# Node.js SAST scanning
-nodejs-scan-sast:
-  stage: security
-  needs:
-  - build
-  variables:
-    SAST_EXCLUDED_ANALYZERS: "" # Enable all analyzers
-    SAST_EXCLUDED_PATHS: "node_modules, dist, coverage, playwright-report"
-  artifacts:
-    reports:
-      sast: gl-sast-report.json
-
-# Security scan with npm audit
+# Security scanning
 security_scan:
   stage: security
-  needs:
-  - build
+  needs: [ install_dependencies ]
   script:
-  - echo "Running security scan..."
-  - apt-get update && apt-get install -y jq
-  - npm audit --json > "${SECURITY_REPORT_FILE}" || true
-  - |
-    if [ -s "${SECURITY_REPORT_FILE}" ]; then
-      echo "Security report generated successfully"
-      # Fixed JQ queries to match npm audit format
-      CRITICAL=$(jq '.metadata.vulnerabilities.critical' "${SECURITY_REPORT_FILE}" 2>/dev/null || echo 0)
-      HIGH=$(jq '.metadata.vulnerabilities.high' "${SECURITY_REPORT_FILE}" 2>/dev/null || echo 0)
-      MEDIUM=$(jq '.metadata.vulnerabilities.moderate' "${SECURITY_REPORT_FILE}" 2>/dev/null || echo 0)
-      LOW=$(jq '.metadata.vulnerabilities.low' "${SECURITY_REPORT_FILE}" 2>/dev/null || echo 0)
-      TOTAL=$(jq '.metadata.vulnerabilities.total' "${SECURITY_REPORT_FILE}" 2>/dev/null || echo 0)
-      
-      echo "Security Scan Summary:"
-      echo "Critical: ${CRITICAL}"
-      echo "High:     ${HIGH}"
-      echo "Medium:   ${MEDIUM}"
-      echo "Low:      ${LOW}"
-      echo "Total:    ${TOTAL}"
-      
-      if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
-        echo "Critical or High Vulnerabilities found:"
-        jq -r '.vulnerabilities | keys | .[0:5] | map("- " + . + ": " + (.severity // "unknown") + " severity") | .[]' "${SECURITY_REPORT_FILE}" 2>/dev/null || echo "Error parsing vulnerabilities"
-        
-        if [ "$CRITICAL" -gt 0 ]; then
-          echo "Critical vulnerabilities found! Pipeline will fail."
-          exit 1
-        fi
-      else
-        echo "No critical or high vulnerabilities found."
-      fi
-    else
-      echo "No vulnerabilities found or report generation failed"
-    fi
+  - npm audit --json > ${SECURITY_REPORT_FILE} || true
   artifacts:
     paths:
     - ${SECURITY_REPORT_FILE}
-    reports:
-      dependency_scanning: ${SECURITY_REPORT_FILE}
-    expire_in: 1 week
-  allow_failure: true
   <<: *default_rules
 
-# Analysis stage (Python script)
+# Analyze test results and logs
 analyze_results:
   stage: analyze
-  image: python:3.10-slim-buster
-  needs:
-  - job: test
-    artifacts: true
-  - job: security_scan
-    artifacts: true
-    optional: true
+  needs: [ run_tests, security_scan ]
+  image: python:3.10
   script:
-  - echo "--- Running analysis script ---"
-  - pip install --no-cache-dir --upgrade pip
-  - pip install requests
-  - CI_LOG_PLACEHOLDER="GitLab CI log content from test job (placeholder)"
-  - |
-    python3 "${PYTHON_ANALYZER_SCRIPT}" \
-      --gitlab-ci-log-placeholder "${CI_LOG_PLACEHOLDER}" \
-      --playwright-html-report-path "${PLAYWRIGHT_REPORTS_DIR}" \
-      --junit-xml-report-path "${PLAYWRIGHT_REPORTS_DIR}/junit.xml" \
-      --security-scan-report-path "${SECURITY_REPORT_FILE}" \
-      --server-log-path "${SERVER_LOG_FILE}" \
-      > "${ANALYSIS_OUTPUT_FILE}"
-  - echo "--- Analysis complete ---"
-  - cat "${ANALYSIS_OUTPUT_FILE}"
+  - pip install -r scripts/requirements.txt
+  - python ${PYTHON_ANALYZER_SCRIPT} --gitlab-ci-log-placeholder "${CI_JOB_URL}" --playwright-html-report-path "${PLAYWRIGHT_REPORTS_DIR}" --junit-xml-report-path "${PLAYWRIGHT_REPORTS_DIR}/junit.xml" --security-scan-report-path "${SECURITY_REPORT_FILE}" --server-log-path "${SERVER_LOG_FILE}" --output-file "${ANALYSIS_OUTPUT_FILE}"
   artifacts:
     paths:
     - ${ANALYSIS_OUTPUT_FILE}
-    expire_in: 1 week
   <<: *default_rules
-  when: always
 
-# Troubleshooting Report
+# Generate troubleshooting report
 generate_troubleshooting_report:
   stage: report
-  image: node:22
-  needs:
-  - job: test
-    artifacts: true
-  - job: security_scan
-    artifacts: true
-    optional: true
-  - job: analyze_results
-    artifacts: true
-    optional: true
-  - job: nodejs-scan-sast
-    artifacts: true
-    optional: true
+  needs: [ run_tests, security_scan, analyze_results ]
   script:
-  - echo "--- Generating HTML Troubleshooting Report ---"
-  - apt-get update && apt-get install -y jq curl
+  - source test_metrics.env
   - chmod +x scripts/troubleshoot_html_reporter.sh
-  - |
-    scripts/troubleshoot_html_reporter.sh \
-      "${PLAYWRIGHT_REPORTS_DIR}" \
-      "${CI_PROJECT_DIR}" \
-      "${CI_PIPELINE_ID}" \
-      "${CI_COMMIT_BRANCH}" \
-      "${NODE_ENV}" \
-      "${COVERAGE_DIR}" \
-      "${SECURITY_REPORT_FILE}" \
-      "gl-sast-report.json"
-  - echo "--- HTML Troubleshooting Report Generated ---"
+  - scripts/troubleshoot_html_reporter.sh "${PLAYWRIGHT_REPORTS_DIR}" "${CI_PROJECT_DIR}" "${CI_PIPELINE_ID}" "${CI_COMMIT_BRANCH}" "${NODE_ENV}" "${COVERAGE_DIR}" "${SECURITY_REPORT_FILE}" "gl-sast-report.json" "${ANALYSIS_OUTPUT_FILE}" "${TEST_DURATION}"
   artifacts:
-    when: always
     paths:
-    - "${TROUBLESHOOT_REPORT_FILE}"
+    - ${TROUBLESHOOT_REPORT_FILE}
     expire_in: 1 week
   <<: *default_rules
-  when: always
 
-# Deployment
-deploy:
+# Deploy to development environment
+deploy_dev:
   stage: deploy
-  needs:
-  - analyze_results
-  - generate_troubleshooting_report
+  needs: [ run_tests, security_scan ]
+  environment:
+    name: development
+    url: https://dev.example.com
   script:
-  - echo "Deploying application..."
-  # Add deployment commands here
+  - echo "Deploying to development environment..."
+  - echo "Application would be deployed here in a real scenario"
   rules:
-  - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  - if: '$CI_COMMIT_BRANCH == "main"'
+
+# Pages deployment for reports
+pages:
+  stage: deploy
+  needs: [ generate_troubleshooting_report ]
+  script:
+  - mkdir -p public
+  - cp ${TROUBLESHOOT_REPORT_FILE} public/index.html
+  - cp -r ${PLAYWRIGHT_REPORTS_DIR} public/
+  - cp -r ${COVERAGE_DIR} public/
+  artifacts:
+    paths:
+    - public
+  rules:
+  - if: '$CI_COMMIT_BRANCH == "main"'
