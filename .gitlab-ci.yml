@@ -9,15 +9,14 @@ stages:
 - deploy
 
 variables:
-  # Paths for reports and logs
   PLAYWRIGHT_REPORTS_DIR: playwright-report
   JUNIT_XML_FILE: ${PLAYWRIGHT_REPORTS_DIR}/junit.xml
   SERVER_LOG_FILE: server.log
   SECURITY_REPORT_FILE: security-report.json
   ANALYSIS_OUTPUT_FILE: analysis_results.json
-  PYTHON_ANALYZER_SCRIPT: duo_troubleshoot_analyzer.py
+  PYTHON_ANALYZER_SCRIPT: scripts/duo_troubleshoot_analyzer.py
 
-# Cache node_modules to speed up subsequent jobs
+# Cache node_modules for faster CI
 cache:
   key: ${CI_COMMIT_REF_SLUG}
   paths:
@@ -33,7 +32,7 @@ build:
   rules:
   - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
 
-# Test stage with Playwright image
+# Test stage with Playwright
 test:
   stage: test
   image: mcr.microsoft.com/playwright:v1.55.1
@@ -51,10 +50,10 @@ test:
   - echo "Waiting for app to be ready at ${APP_URL}..."
   - |
     npx wait-on "${APP_URL}" --timeout 60000 --interval 1000 || \
-    (echo "ERROR: Server failed to start or become ready." ; \
-     echo "--- Contents of ${SERVER_LOG_FILE} ---" ; \
-     cat "${SERVER_LOG_FILE}" ; \
-     echo "----------------------------------------" ; \
+    (echo "ERROR: Server failed to start or become ready."; \
+     echo "--- Contents of ${SERVER_LOG_FILE} ---"; \
+     cat "${SERVER_LOG_FILE}"; \
+     echo "----------------------------------------"; \
      exit 1)
   - echo "--- Running Playwright tests ---"
   - mkdir -p "${PLAYWRIGHT_REPORTS_DIR}"
@@ -63,6 +62,32 @@ test:
   - echo "Stopping TODO app..."
   - pkill -f "http-server" || true
   - exit $PLAYWRIGHT_EXIT_CODE
+  artifacts:
+    when: always
+    paths:
+    - "${PLAYWRIGHT_REPORTS_DIR}/"
+    - "${SERVER_LOG_FILE}"
+    reports:
+      junit: "${JUNIT_XML_FILE}"
+  rules:
+  - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+# HTML Reporting stage
+html_report:
+  stage: analyze
+  needs:
+  - job: test
+    artifacts: true
+  script:
+  - echo "Preparing HTML report artifacts from ${PLAYWRIGHT_REPORTS_DIR}..."
+  - ls -la "${PLAYWRIGHT_REPORTS_DIR}" # optional: list contents for debugging
+  artifacts:
+    when: always
+    paths:
+    - playwright-report/ # Ensure it matches the test job output folder
+    expire_in: 1 week
+  rules:
+  - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
 
 # Security stage
 security_scan:
@@ -73,7 +98,13 @@ security_scan:
   - echo "Running security scan..."
   - apt-get update && apt-get install -y jq
   - npm audit --json > "${SECURITY_REPORT_FILE}" || true
-  - if [ -s "${SECURITY_REPORT_FILE}" ]; then echo "Security report generated successfully"; jq . "${SECURITY_REPORT_FILE}" | head -n 20; else echo "No vulnerabilities found or report generation failed"; fi
+  - |
+    if [ -s "${SECURITY_REPORT_FILE}" ]; then
+      echo "Security report generated successfully"
+      jq . "${SECURITY_REPORT_FILE}" | head -n 20
+    else
+      echo "No vulnerabilities found or report generation failed"
+    fi
   artifacts:
     when: always
     paths:
@@ -98,7 +129,14 @@ analyze_results:
   - pip install --no-cache-dir --upgrade pip
   - chmod +x "${PYTHON_ANALYZER_SCRIPT}"
   - CI_LOG_PLACEHOLDER="GitLab CI log content from test job (placeholder)"
-  - python3 "${PYTHON_ANALYZER_SCRIPT}" \ --gitlab-ci-log-placeholder "${CI_LOG_PLACEHOLDER}" \ --playwright-html-report-path "${PLAYWRIGHT_REPORTS_DIR}" \ --junit-xml-report-path "${JUNIT_XML_FILE}" \ --security-scan-report-path "${SECURITY_REPORT_FILE}" \ --server-log-path "${SERVER_LOG_FILE}" \ > "${ANALYSIS_OUTPUT_FILE}"
+  - |
+    python3 "${PYTHON_ANALYZER_SCRIPT}" \
+      --gitlab-ci-log-placeholder "${CI_LOG_PLACEHOLDER}" \
+      --playwright-html-report-path "${PLAYWRIGHT_REPORTS_DIR}" \
+      --junit-xml-report-path "${JUNIT_XML_FILE}" \
+      --security-scan-report-path "${SECURITY_REPORT_FILE}" \
+      --server-log-path "${SERVER_LOG_FILE}" \
+      > "${ANALYSIS_OUTPUT_FILE}"
   - echo "--- Analysis complete. Results saved to ${ANALYSIS_OUTPUT_FILE} ---"
   - cat "${ANALYSIS_OUTPUT_FILE}"
   artifacts:
