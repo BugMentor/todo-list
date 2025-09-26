@@ -82,12 +82,22 @@ extract_junit_summary() {
     if [ -f "$xml_file" ]; then
         local total_tests=0 total_failures=0 total_errors=0 total_skipped=0
         
-        while IFS= read -r line; do
-            total_tests=$((total_tests + $(echo "$line" | grep -oP 'tests="\K[^"]+' | head -1 || echo 0)))
-            total_failures=$((total_failures + $(echo "$line" | grep -oP 'failures="\K[^"]+' | head -1 || echo 0)))
-            total_errors=$((total_errors + $(echo "$line" | grep -oP 'errors="\K[^"]+' | head -1 || echo 0)))
-            total_skipped=$((total_skipped + $(echo "$line" | grep -oP 'skipped="\K[^"]+' | head -1 || echo 0)))
-        done < <(grep -oP '<testsuite[^>]*>' "$xml_file")
+        # FIX 1: Improved test counting logic to avoid duplication
+        if grep -q '<testsuites>' "$xml_file"; then
+            # If there's a testsuites container element, use those totals
+            total_tests=$(grep -oP '<testsuites[^>]*tests="\K[^"]+' "$xml_file" || echo 0)
+            total_failures=$(grep -oP '<testsuites[^>]*failures="\K[^"]+' "$xml_file" || echo 0)
+            total_errors=$(grep -oP '<testsuites[^>]*errors="\K[^"]+' "$xml_file" || echo 0)
+            total_skipped=$(grep -oP '<testsuites[^>]*skipped="\K[^"]+' "$xml_file" || echo 0)
+        else
+            # Count only top-level testsuite elements
+            while IFS= read -r line; do
+                total_tests=$((total_tests + $(echo "$line" | grep -oP 'tests="\K[^"]+' || echo 0)))
+                total_failures=$((total_failures + $(echo "$line" | grep -oP 'failures="\K[^"]+' || echo 0)))
+                total_errors=$((total_errors + $(echo "$line" | grep -oP 'errors="\K[^"]+' || echo 0)))
+                total_skipped=$((total_skipped + $(echo "$line" | grep -oP 'skipped="\K[^"]+' || echo 0)))
+            done < <(grep -oP '<testsuite[^>]*>' "$xml_file" | grep -v '<testsuite.*<testsuite')
+        fi
         
         local passed=$((total_tests - total_failures - total_errors - total_skipped))
         
@@ -118,11 +128,12 @@ extract_junit_summary() {
 extract_junit_summary "$JUNIT_XML_PATH" "Playwright E2E"
 
 # --- HTML Reports ---
+# FIX 2: Corrected link to Playwright HTML report
 {
     echo "<h2>HTML Reports</h2><ul>"
-    # Fixed: Look directly in the REPORTS_DIR for index.html instead of a /html subdirectory
     if [ -d "$REPORTS_DIR" ] && [ -f "$REPORTS_DIR/index.html" ]; then
-        echo "<li>Playwright HTML Report: <a href=\"${REPORTS_DIR}/index.html\">index.html</a></li>"
+        # Use correct relative path for the link and add target="_blank"
+        echo "<li>Playwright HTML Report: <a href=\"$REPORTS_DIR/index.html\" target=\"_blank\">index.html</a></li>"
     else
         echo "<li>No Playwright HTML reports found.</li>"
     fi
@@ -133,7 +144,7 @@ extract_junit_summary "$JUNIT_XML_PATH" "Playwright E2E"
 {
     echo "<h2>Coverage Reports</h2>"
     if [ -n "$COVERAGE_DIR" ] && [ -d "$COVERAGE_DIR" ] && [ -f "$COVERAGE_DIR/lcov-report/index.html" ]; then
-        echo "<p>Coverage report available: <a href=\"$COVERAGE_DIR/lcov-report/index.html\">index.html</a></p>"
+        echo "<p>Coverage report available: <a href=\"$COVERAGE_DIR/lcov-report/index.html\" target=\"_blank\">index.html</a></p>"
         if [ -f "$COVERAGE_DIR/coverage-summary.json" ] && command -v jq &>/dev/null; then
             coverage_pct=$(jq -r '.total.lines.pct' "$COVERAGE_DIR/coverage-summary.json" 2>/dev/null || echo "N/A")
             echo "<p>Overall coverage: <b>$coverage_pct%</b></p>"
@@ -144,15 +155,46 @@ extract_junit_summary "$JUNIT_XML_PATH" "Playwright E2E"
 } >> "$REPORT_FILE"
 
 # --- Security ---
+# FIX 3: Improved security scan report handling
 if [ -n "$SECURITY_REPORT_FILE" ] && [ -f "$SECURITY_REPORT_FILE" ]; then
-    echo "<h2>Security Scan</h2><pre>" >> "$REPORT_FILE"
+    echo "<h2>Security Scan</h2>" >> "$REPORT_FILE"
     if command -v jq &>/dev/null; then
-        jq '.metadata.vulnerabilities' "$SECURITY_REPORT_FILE" >> "$REPORT_FILE" || echo "Error parsing security report with jq." >> "$REPORT_FILE"
+        # Check JSON structure and handle different formats
+        if jq -e '.metadata.vulnerabilities' "$SECURITY_REPORT_FILE" >/dev/null 2>&1; then
+            # Expected structure
+            echo "<h3>Vulnerabilities Summary</h3>" >> "$REPORT_FILE"
+            echo "<ul>" >> "$REPORT_FILE"
+            echo "<li><b>Critical:</b> $(jq -r '.metadata.vulnerabilities.critical // 0' "$SECURITY_REPORT_FILE")</li>" >> "$REPORT_FILE"
+            echo "<li><b>High:</b> $(jq -r '.metadata.vulnerabilities.high // 0' "$SECURITY_REPORT_FILE")</li>" >> "$REPORT_FILE"
+            echo "<li><b>Moderate:</b> $(jq -r '.metadata.vulnerabilities.moderate // 0' "$SECURITY_REPORT_FILE")</li>" >> "$REPORT_FILE"
+            echo "<li><b>Low:</b> $(jq -r '.metadata.vulnerabilities.low // 0' "$SECURITY_REPORT_FILE")</li>" >> "$REPORT_FILE"
+            echo "<li><b>Info:</b> $(jq -r '.metadata.vulnerabilities.info // 0' "$SECURITY_REPORT_FILE")</li>" >> "$REPORT_FILE"
+            echo "</ul>" >> "$REPORT_FILE"
+            elif jq -e '.vulnerabilities' "$SECURITY_REPORT_FILE" >/dev/null 2>&1; then
+            # Alternative structure
+            echo "<h3>Vulnerabilities Found</h3>" >> "$REPORT_FILE"
+            vuln_count=$(jq '.vulnerabilities | length' "$SECURITY_REPORT_FILE")
+            echo "<p>Total vulnerabilities: $vuln_count</p>" >> "$REPORT_FILE"
+            
+            if [ "$vuln_count" -gt 0 ]; then
+                echo "<table>" >> "$REPORT_FILE"
+                echo "<tr><th>Severity</th><th>Count</th></tr>" >> "$REPORT_FILE"
+                jq -r '.vulnerabilities | group_by(.severity) | map({severity: .[0].severity, count: length}) | .[] | "<tr><td>\(.severity)</td><td>\(.count)</td></tr>"' "$SECURITY_REPORT_FILE" >> "$REPORT_FILE"
+                echo "</table>" >> "$REPORT_FILE"
+            fi
+        else
+            # Unknown structure - show raw JSON
+            echo "<p>Security report structure is different than expected. Raw content:</p>" >> "$REPORT_FILE"
+            echo "<pre>" >> "$REPORT_FILE"
+            jq '.' "$SECURITY_REPORT_FILE" >> "$REPORT_FILE" || cat "$SECURITY_REPORT_FILE" >> "$REPORT_FILE"
+            echo "</pre>" >> "$REPORT_FILE"
+        fi
     else
-        echo "jq not found. Raw security report content:" >> "$REPORT_FILE"
+        echo "<p>jq not found. Raw security report content:</p>" >> "$REPORT_FILE"
+        echo "<pre>" >> "$REPORT_FILE"
         cat "$SECURITY_REPORT_FILE" >> "$REPORT_FILE"
+        echo "</pre>" >> "$REPORT_FILE"
     fi
-    echo "</pre>" >> "$REPORT_FILE"
 else
     echo "<h2>Security Scan</h2><p>No security report file provided or found.</p>" >> "$REPORT_FILE"
 fi
@@ -187,7 +229,12 @@ echo "</pre>" >> "$REPORT_FILE"
     echo "<h2>Recommendations</h2><ul>"
     total_failures_from_junit=0
     if [ -f "$JUNIT_XML_PATH" ]; then
-        total_failures_from_junit=$(grep -oP 'failures="\K[^"]+' "$JUNIT_XML_PATH" | awk '{s+=$1} END{print s}')
+        # FIX: Use the same improved test counting logic for recommendations
+        if grep -q '<testsuites>' "$JUNIT_XML_PATH"; then
+            total_failures_from_junit=$(grep -oP '<testsuites[^>]*failures="\K[^"]+' "$JUNIT_XML_PATH" || echo 0)
+        else
+            total_failures_from_junit=$(grep -oP '<testsuite[^>]*failures="\K[^"]+' "$JUNIT_XML_PATH" | awk '{s+=$1} END{print s}')
+        fi
     fi
     
     if [ "${total_failures_from_junit:-0}" -gt 0 ]; then
@@ -196,17 +243,30 @@ echo "</pre>" >> "$REPORT_FILE"
         echo "<li>✅ All tests passing.</li>"
     fi
     
+    # FIX: Improved security recommendations with better error handling
     if [ -n "$SECURITY_REPORT_FILE" ] && [ -f "$SECURITY_REPORT_FILE" ] && command -v jq &>/dev/null; then
-        high_critical_vulns=$(jq '.metadata.vulnerabilities.high + .metadata.vulnerabilities.critical' "$SECURITY_REPORT_FILE" 2>/dev/null || echo 0)
-        if [ "$high_critical_vulns" -gt 0 ]; then
-            echo "<li>🚨 Found <b>$high_critical_vulns high/critical</b> security vulnerabilities. Address these urgently.</li>"
-        else
-            total_vulns=$(jq '.metadata.vulnerabilities.info + .metadata.vulnerabilities.low + .metadata.vulnerabilities.moderate' "$SECURITY_REPORT_FILE" 2>/dev/null || echo 0)
-            if [ "$total_vulns" -gt 0 ]; then
-                echo "<li>⚠️ Found <b>$total_vulns low/moderate</b> security vulnerabilities. Consider addressing them.</li>"
+        if jq -e '.metadata.vulnerabilities' "$SECURITY_REPORT_FILE" >/dev/null 2>&1; then
+            high_critical_vulns=$(jq -r '(.metadata.vulnerabilities.high // 0) + (.metadata.vulnerabilities.critical // 0)' "$SECURITY_REPORT_FILE" 2>/dev/null || echo 0)
+            if [ "$high_critical_vulns" -gt 0 ]; then
+                echo "<li>🚨 Found <b>$high_critical_vulns high/critical</b> security vulnerabilities. Address these urgently.</li>"
             else
-                echo "<li>✅ No significant security vulnerabilities detected.</li>"
+                total_vulns=$(jq -r '(.metadata.vulnerabilities.info // 0) + (.metadata.vulnerabilities.low // 0) + (.metadata.vulnerabilities.moderate // 0)' "$SECURITY_REPORT_FILE" 2>/dev/null || echo 0)
+                if [ "$total_vulns" -gt 0 ]; then
+                    echo "<li>⚠️ Found <b>$total_vulns low/moderate</b> security vulnerabilities. Consider addressing them.</li>"
+                else
+                    echo "<li>✅ No significant security vulnerabilities detected.</li>"
+                fi
             fi
+            elif jq -e '.vulnerabilities' "$SECURITY_REPORT_FILE" >/dev/null 2>&1; then
+            # Alternative structure
+            high_sev_count=$(jq -r '[.vulnerabilities[] | select(.severity == "high" or .severity == "critical")] | length' "$SECURITY_REPORT_FILE" 2>/dev/null || echo 0)
+            if [ "$high_sev_count" -gt 0 ]; then
+                echo "<li>🚨 Found <b>$high_sev_count high/critical</b> security vulnerabilities. Address these urgently.</li>"
+            else
+                echo "<li>✅ No high/critical security vulnerabilities detected.</li>"
+            fi
+        else
+            echo "<li>ℹ️ Security scan completed but format is not recognized. Review the raw output.</li>"
         fi
     else
         echo "<li>ℹ️ No security scan report was provided. Consider adding security scanning to your pipeline.</li>"
