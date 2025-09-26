@@ -39,75 +39,87 @@ cache:
   paths:
   - node_modules/
 
-# Install dependencies
+# --- Build Stage ---
 install_dependencies:
   stage: build
-  script:
-  - npm ci
+  script: npm ci
   artifacts:
     paths:
     - node_modules/
   <<: *default_rules
 
-# Run tests with Playwright
+# --- Test Stage ---
 run_tests:
   stage: test
   needs: [ install_dependencies ]
   script:
   - echo "START_TIME=$(date +%s)" > test_metrics.env
-  - mkdir -p ${PLAYWRIGHT_REPORTS_DIR}
+  - mkdir -p "${PLAYWRIGHT_REPORTS_DIR}"
   - npx playwright install --with-deps chromium
   - npx playwright test --reporter=html,junit --output="${PLAYWRIGHT_REPORTS_DIR}"
+  - ls -la "${PLAYWRIGHT_REPORTS_DIR}"
   - echo "END_TIME=$(date +%s)" >> test_metrics.env
-  - echo "TEST_DURATION=$(($(grep END_TIME test_metrics.env | cut -d= -f2) - $(grep START_TIME test_metrics.env | cut -d= -f2)))" >> test_metrics.env
+  - "START_TIME=$(grep START_TIME test_metrics.env | cut -d= -f2)"
+  - "END_TIME=$(grep END_TIME test_metrics.env | cut -d= -f2)"
+  - "TEST_DURATION=$((END_TIME - START_TIME))"
+  - "echo TEST_DURATION=${TEST_DURATION} >> test_metrics.env"
+  - "echo Test duration: ${TEST_DURATION} seconds"
   artifacts:
     paths:
-    - ${PLAYWRIGHT_REPORTS_DIR}/
-    - ${COVERAGE_DIR}/
+    - "${PLAYWRIGHT_REPORTS_DIR}/"
+    - "${COVERAGE_DIR}/"
     - test_metrics.env
     reports:
-      junit: ${PLAYWRIGHT_REPORTS_DIR}/junit.xml
+      junit: "${PLAYWRIGHT_REPORTS_DIR}/junit.xml"
   <<: *default_rules
 
-# Security scanning
+# --- Security Stage ---
 security_scan:
   stage: security
   needs: [ install_dependencies ]
   script:
-  - npm audit --json > ${SECURITY_REPORT_FILE} || true
+  - apt-get update && apt-get install -y jq
+  - npm audit --json > "${SECURITY_REPORT_FILE}" || true
+  - "if [ -f \"${SECURITY_REPORT_FILE}\" ]; then jq -r '.metadata.vulnerabilities | to_entries[] | \"\\(.key): \\(.value)\"' \"${SECURITY_REPORT_FILE}\" 2>/dev/null || echo \"No vulnerabilities found or invalid format\"; else echo \"Security report file not found\"; fi"
   artifacts:
     paths:
-    - ${SECURITY_REPORT_FILE}
+    - "${SECURITY_REPORT_FILE}"
   <<: *default_rules
 
-# Analyze test results and logs
+# --- Analyze Stage ---
 analyze_results:
   stage: analyze
   needs: [ run_tests, security_scan ]
   image: python:3.10
   script:
   - pip install -r scripts/requirements.txt
-  - python ${PYTHON_ANALYZER_SCRIPT} --gitlab-ci-log-placeholder "${CI_JOB_URL}" --playwright-html-report-path "${PLAYWRIGHT_REPORTS_DIR}" --junit-xml-report-path "${PLAYWRIGHT_REPORTS_DIR}/junit.xml" --security-scan-report-path "${SECURITY_REPORT_FILE}" --server-log-path "${SERVER_LOG_FILE}" --output-file "${ANALYSIS_OUTPUT_FILE}" || true
+  - ls -la "${PLAYWRIGHT_REPORTS_DIR}" || echo "Playwright reports directory not found"
+  - "if [ -f \"${PLAYWRIGHT_REPORTS_DIR}/junit.xml\" ]; then echo \"JUnit report exists\"; else echo \"JUnit report missing\"; fi"
+  - "if [ -f \"${SECURITY_REPORT_FILE}\" ]; then echo \"Security report exists\"; else echo \"Security report missing\"; fi"
+  - python "${PYTHON_ANALYZER_SCRIPT}" --gitlab-ci-log-placeholder "${CI_JOB_URL}" --playwright-html-report-path "${PLAYWRIGHT_REPORTS_DIR}" --junit-xml-report-path "${PLAYWRIGHT_REPORTS_DIR}/junit.xml" --security-scan-report-path "${SECURITY_REPORT_FILE}" --server-log-path "${SERVER_LOG_FILE}" --output-file "${ANALYSIS_OUTPUT_FILE}" || true
+  - "if [ -f \"${ANALYSIS_OUTPUT_FILE}\" ]; then cat \"${ANALYSIS_OUTPUT_FILE}\"; else echo \"Analysis output file not created\"; fi"
   artifacts:
     paths:
-    - ${ANALYSIS_OUTPUT_FILE}
+    - "${ANALYSIS_OUTPUT_FILE}"
   <<: *default_rules
 
-# Generate troubleshooting report
+# --- Report Stage ---
 generate_troubleshooting_report:
   stage: report
   needs: [ run_tests, security_scan, analyze_results ]
   script:
+  - apt-get update && apt-get install -y jq
   - source test_metrics.env
   - chmod +x scripts/troubleshoot_html_reporter.sh
-  - scripts/troubleshoot_html_reporter.sh "${PLAYWRIGHT_REPORTS_DIR}" "${CI_PROJECT_DIR}" "${CI_PIPELINE_ID}" "${CI_COMMIT_BRANCH}" "${NODE_ENV}" "${COVERAGE_DIR}" "${SECURITY_REPORT_FILE}" "gl-sast-report.json" "${ANALYSIS_OUTPUT_FILE}" "${TEST_DURATION}"
+  - scripts/troubleshoot_html_reporter.sh "${PLAYWRIGHT_REPORTS_DIR}" "${CI_PROJECT_DIR}" "${CI_PIPELINE_ID}" "${CI_COMMIT_BRANCH}" "${NODE_ENV}" "${COVERAGE_DIR}" "${SECURITY_REPORT_FILE}" "gl-sast-report.json" "${TEST_DURATION}" "${ANALYSIS_OUTPUT_FILE}"
+  - "if [ -f \"${TROUBLESHOOT_REPORT_FILE}\" ]; then echo \"Troubleshooting report generated\"; else echo \"Troubleshooting report not created\"; fi"
   artifacts:
     paths:
-    - ${TROUBLESHOOT_REPORT_FILE}
+    - "${TROUBLESHOOT_REPORT_FILE}"
     expire_in: 1 week
   <<: *default_rules
 
-# Deploy to development environment
+# --- Deploy Stage ---
 deploy_dev:
   stage: deploy
   needs: [ run_tests, security_scan ]
@@ -116,19 +128,18 @@ deploy_dev:
     url: https://dev.example.com
   script:
   - echo "Deploying to development environment..."
-  - echo "Application would be deployed here in a real scenario"
   rules:
   - if: '$CI_COMMIT_BRANCH == "main"'
 
-# Pages deployment for reports
+# --- Pages Deployment ---
 pages:
   stage: deploy
   needs: [ generate_troubleshooting_report ]
   script:
   - mkdir -p public
-  - cp ${TROUBLESHOOT_REPORT_FILE} public/index.html
-  - cp -r ${PLAYWRIGHT_REPORTS_DIR} public/
-  - cp -r ${COVERAGE_DIR} public/
+  - cp "${TROUBLESHOOT_REPORT_FILE}" public/index.html
+  - "if [ -d \"${PLAYWRIGHT_REPORTS_DIR}\" ]; then cp -r \"${PLAYWRIGHT_REPORTS_DIR}\" public/; else echo \"Playwright reports not found\"; fi"
+  - "if [ -d \"${COVERAGE_DIR}\" ]; then cp -r \"${COVERAGE_DIR}\" public/; else echo \"Coverage directory not found\"; fi"
   artifacts:
     paths:
     - public
