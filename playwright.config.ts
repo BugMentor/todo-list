@@ -9,8 +9,8 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   // Update the reporter configuration to include both HTML and JUnit
   reporter: [
-    ["html"],
-    ["junit", { outputFile: "playwright-report/junit.xml" }],
+    ['html', { outputFolder: 'playwright-report' }],
+    ['junit', { outputFile: 'playwright-report/junit.xml' }],
   ],
   use: {
     baseURL: "http://localhost:3000",
