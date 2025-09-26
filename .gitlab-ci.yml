@@ -10,7 +10,6 @@ stages:
 
 variables:
   PLAYWRIGHT_REPORTS_DIR: playwright-report
-  JUNIT_XML_FILE: ${PLAYWRIGHT_REPORTS_DIR}/junit.xml
   SERVER_LOG_FILE: server.log
   SECURITY_REPORT_FILE: security-report.json
   ANALYSIS_OUTPUT_FILE: analysis_results.json
@@ -57,10 +56,13 @@ test:
      exit 1)
   - echo "--- Running Playwright tests ---"
   - mkdir -p "${PLAYWRIGHT_REPORTS_DIR}"
-  - npx playwright test --reporter=html,junit --output="${PLAYWRIGHT_REPORTS_DIR}"
+  # Specify exact output file for JUnit report
+  - npx playwright test --reporter=html --reporter=junit:${PLAYWRIGHT_REPORTS_DIR}/junit.xml
   - PLAYWRIGHT_EXIT_CODE=$?
   - echo "Stopping TODO app..."
   - pkill -f "http-server" || true
+  - echo "Listing generated report files for debugging:"
+  - ls -la "${PLAYWRIGHT_REPORTS_DIR}"
   - exit $PLAYWRIGHT_EXIT_CODE
   artifacts:
     when: always
@@ -68,7 +70,7 @@ test:
     - "${PLAYWRIGHT_REPORTS_DIR}/"
     - "${SERVER_LOG_FILE}"
     reports:
-      junit: "${JUNIT_XML_FILE}"
+      junit: "${PLAYWRIGHT_REPORTS_DIR}/junit.xml"
   rules:
   - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
 
@@ -80,11 +82,11 @@ html_report:
     artifacts: true
   script:
   - echo "Preparing HTML report artifacts from ${PLAYWRIGHT_REPORTS_DIR}..."
-  - ls -la "${PLAYWRIGHT_REPORTS_DIR}" # optional: list contents for debugging
+  - ls -la "${PLAYWRIGHT_REPORTS_DIR}"
   artifacts:
     when: always
     paths:
-    - playwright-report/ # Ensure it matches the test job output folder
+    - "${PLAYWRIGHT_REPORTS_DIR}/"
     expire_in: 1 week
   rules:
   - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
@@ -133,7 +135,7 @@ analyze_results:
     python3 "${PYTHON_ANALYZER_SCRIPT}" \
       --gitlab-ci-log-placeholder "${CI_LOG_PLACEHOLDER}" \
       --playwright-html-report-path "${PLAYWRIGHT_REPORTS_DIR}" \
-      --junit-xml-report-path "${JUNIT_XML_FILE}" \
+      --junit-xml-report-path "${PLAYWRIGHT_REPORTS_DIR}/junit.xml" \
       --security-scan-report-path "${SECURITY_REPORT_FILE}" \
       --server-log-path "${SERVER_LOG_FILE}" \
       > "${ANALYSIS_OUTPUT_FILE}"
