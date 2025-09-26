@@ -1,4 +1,4 @@
-# Default image for jobs that don't specify their own
+# Base configuration
 image: node:22
 
 stages:
@@ -15,7 +15,12 @@ variables:
   ANALYSIS_OUTPUT_FILE: analysis_results.json
   PYTHON_ANALYZER_SCRIPT: scripts/duo_troubleshoot_analyzer.py
 
-# Cache node_modules for faster CI
+# Shared pipeline rules
+.default_rules: &default_rules
+  rules:
+  - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+# Dependency caching
 cache:
   key: ${CI_COMMIT_REF_SLUG}
   paths:
@@ -28,10 +33,9 @@ build:
   script:
   - echo "Building the application..."
   - npm install
-  rules:
-  - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  <<: *default_rules
 
-# Test stage with Playwright
+# Test stage
 test:
   stage: test
   image: mcr.microsoft.com/playwright:v1.55.1
@@ -39,29 +43,32 @@ test:
   - build
   script:
   - echo "--- Test Job Setup ---"
-  - echo "Installing project dependencies..."
   - npm ci
-  - echo "Checking if http-server is available..."
-  - which http-server || npm install -g http-server
-  - echo "Starting TODO app in background..."
+  - npm install -g http-server || echo "http-server already installed"
+
+  # Start server in background
   - nohup http-server . -p 8080 -c-1 --silent > "${SERVER_LOG_FILE}" 2>&1 &
   - export APP_URL="http://localhost:8080"
-  - echo "Waiting for app to be ready at ${APP_URL}..."
+
+  # Wait for server to be ready
   - |
-    npx wait-on "${APP_URL}" --timeout 60000 --interval 1000 || \
-    (echo "ERROR: Server failed to start or become ready."; \
-     echo "--- Contents of ${SERVER_LOG_FILE} ---"; \
-     cat "${SERVER_LOG_FILE}"; \
-     echo "----------------------------------------"; \
-     exit 1)
+    npx wait-on "${APP_URL}" --timeout 60000 --interval 1000 || {
+      echo "ERROR: Server failed to start or become ready."
+      echo "--- Server Log Contents ---"
+      cat "${SERVER_LOG_FILE}"
+      echo "-------------------------"
+      exit 1
+    }
+
+  # Run tests
   - echo "--- Running Playwright tests ---"
   - mkdir -p "${PLAYWRIGHT_REPORTS_DIR}"
-  # Fixed Playwright command with proper reporter syntax
-  - npx playwright test --reporter=html --reporter=junit --output=${PLAYWRIGHT_REPORTS_DIR}/junit.xml
+  - npx playwright test --reporter=html --reporter=junit --output="${PLAYWRIGHT_REPORTS_DIR}/junit.xml"
   - PLAYWRIGHT_EXIT_CODE=$?
-  - echo "Stopping TODO app..."
+
+  # Cleanup
   - pkill -f "http-server" || true
-  - echo "Listing generated report files for debugging:"
+  - echo "Test artifacts in ${PLAYWRIGHT_REPORTS_DIR}:"
   - ls -la "${PLAYWRIGHT_REPORTS_DIR}"
   - exit $PLAYWRIGHT_EXIT_CODE
   artifacts:
@@ -71,27 +78,27 @@ test:
     - "${SERVER_LOG_FILE}"
     reports:
       junit: "${PLAYWRIGHT_REPORTS_DIR}/junit.xml"
-  rules:
-  - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  <<: *default_rules
 
-# HTML Reporting stage
+# HTML Report generation
 html_report:
   stage: analyze
   needs:
   - job: test
     artifacts: true
   script:
-  - echo "Preparing HTML report artifacts from ${PLAYWRIGHT_REPORTS_DIR}..."
+  - echo "Processing HTML report from ${PLAYWRIGHT_REPORTS_DIR}..."
   - ls -la "${PLAYWRIGHT_REPORTS_DIR}"
+  # Add any additional report processing here if needed
   artifacts:
-    when: always
     paths:
     - "${PLAYWRIGHT_REPORTS_DIR}/"
     expire_in: 1 week
-  rules:
-  - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  <<: *default_rules
+  # Add explicit condition to ensure this job runs only when test succeeds
+  when: on_success
 
-# Security stage
+# Security scanning
 security_scan:
   stage: security
   needs:
@@ -108,15 +115,13 @@ security_scan:
       echo "No vulnerabilities found or report generation failed"
     fi
   artifacts:
-    when: always
     paths:
     - "${SECURITY_REPORT_FILE}"
     expire_in: 1 week
   allow_failure: true
-  rules:
-  - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  <<: *default_rules
 
-# Analyze stage
+# Analysis stage
 analyze_results:
   stage: analyze
   image: python:3.10-slim-buster
@@ -127,7 +132,7 @@ analyze_results:
     artifacts: true
     optional: true
   script:
-  - echo "--- Running troubleshooting and analysis script ---"
+  - echo "--- Running analysis script ---"
   - pip install --no-cache-dir --upgrade pip
   - chmod +x "${PYTHON_ANALYZER_SCRIPT}"
   - CI_LOG_PLACEHOLDER="GitLab CI log content from test job (placeholder)"
@@ -139,18 +144,16 @@ analyze_results:
       --security-scan-report-path "${SECURITY_REPORT_FILE}" \
       --server-log-path "${SERVER_LOG_FILE}" \
       > "${ANALYSIS_OUTPUT_FILE}"
-  - echo "--- Analysis complete. Results saved to ${ANALYSIS_OUTPUT_FILE} ---"
+  - echo "--- Analysis complete ---"
   - cat "${ANALYSIS_OUTPUT_FILE}"
   artifacts:
-    when: always
     paths:
     - "${ANALYSIS_OUTPUT_FILE}"
     expire_in: 1 day
-  rules:
-  - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-    when: always
+  <<: *default_rules
+  when: always
 
-# Deploy stage
+# Deployment
 deploy:
   stage: deploy
   needs:
