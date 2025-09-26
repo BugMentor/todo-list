@@ -15,79 +15,171 @@ SAST_REPORT_FILE="${8:-}"
 REPORT_FILE="${CI_PROJECT_DIR}/troubleshooting-report.html"
 JUNIT_XML="${REPORTS_DIR}/junit.xml"
 
-# --- Test results ---
-TOTAL_TESTS=0
-FAILED_TESTS=0
-ERROR_TESTS=0
-SKIPPED_TESTS=0
-PASSED_TESTS=0
+# --- Helper functions ---
+function log_info() {
+    echo "[INFO] $1"
+}
 
-if [ -f "$JUNIT_XML" ]; then
-    TOTAL_TESTS=$(grep -oP '<testsuites[^>]*tests="\K[^"]+' "$JUNIT_XML" || echo 0)
-    FAILED_TESTS=$(grep -oP '<testsuites[^>]*failures="\K[^"]+' "$JUNIT_XML" || echo 0)
-    ERROR_TESTS=$(grep -oP '<testsuites[^>]*errors="\K[^"]+' "$JUNIT_XML" || echo 0)
-    SKIPPED_TESTS=$(grep -oP '<testsuites[^>]*skipped="\K[^"]+' "$JUNIT_XML" || echo 0)
-    PASSED_TESTS=$((TOTAL_TESTS - FAILED_TESTS - ERROR_TESTS - SKIPPED_TESTS))
-fi
+function log_error() {
+    echo "[ERROR] $1" >&2
+}
 
-# --- System Information ---
+function parse_junit_results() {
+    local xml_file="$1"
+    local results=()
+    local total=0
+    local failures=0
+    local errors=0
+    local skipped=0
+    local passed=0
+    
+    if [ ! -f "$xml_file" ]; then
+        log_error "JUnit XML file not found: $xml_file"
+        results=(0 0 0 0 0)
+        echo "${results[@]}"
+        return
+    fi
+    
+    total=$(grep -oP '<testsuites[^>]*tests="\K[^"]+' "$xml_file" 2>/dev/null || echo 0)
+    failures=$(grep -oP '<testsuites[^>]*failures="\K[^"]+' "$xml_file" 2>/dev/null || echo 0)
+    errors=$(grep -oP '<testsuites[^>]*errors="\K[^"]+' "$xml_file" 2>/dev/null || echo 0)
+    skipped=$(grep -oP '<testsuites[^>]*skipped="\K[^"]+' "$xml_file" 2>/dev/null || echo 0)
+    passed=$((total - failures - errors - skipped))
+    
+    results=("$total" "$passed" "$failures" "$errors" "$skipped")
+    echo "${results[@]}"
+}
+
+function parse_security_report() {
+    local report_file="$1"
+    local summary="No security report provided."
+    local findings="No vulnerabilities found."
+    local critical=0
+    local high=0
+    local moderate=0
+    local low=0
+    local total=0
+    
+    if [ ! -f "$report_file" ] || [ ! -s "$report_file" ]; then
+        echo "$summary" "$findings"
+        return
+    fi
+    
+    summary="Security report file found at: $report_file"
+    
+    if ! jq -e '.' "$report_file" >/dev/null 2>&1; then
+        findings="Invalid JSON format in security report."
+        echo "$summary" "$findings"
+        return
+    fi
+    
+    # Format the security findings for better readability
+    if jq -e '.metadata.vulnerabilities' "$report_file" >/dev/null 2>&1; then
+        critical=$(jq -r '.metadata.vulnerabilities.critical // 0' "$report_file")
+        high=$(jq -r '.metadata.vulnerabilities.high // 0' "$report_file")
+        moderate=$(jq -r '.metadata.vulnerabilities.moderate // 0' "$report_file")
+        low=$(jq -r '.metadata.vulnerabilities.low // 0' "$report_file")
+        total=$(jq -r '.metadata.vulnerabilities.total // 0' "$report_file")
+        
+        findings="{\n"
+        findings+="  \"auditReportVersion\": $(jq -r '.auditReportVersion // 2' "$report_file"),\n"
+        findings+="  \"vulnerabilities\": $(jq -r '.vulnerabilities // {}' "$report_file"),\n"
+        findings+="  \"metadata\": {\n"
+        findings+="    \"vulnerabilities\": {\n"
+        findings+="      \"info\": 0,\n"
+        findings+="      \"low\": $low,\n"
+        findings+="      \"moderate\": $moderate,\n"
+        findings+="      \"high\": $high,\n"
+        findings+="      \"critical\": $critical,\n"
+        findings+="      \"total\": $total\n"
+        findings+="    },\n"
+        findings+="    \"dependencies\": $(jq -r '.metadata.dependencies // {}' "$report_file")\n"
+        findings+="  }\n"
+        findings+="}"
+    else
+        findings=$(jq -r '.' "$report_file")
+    fi
+    
+    echo "$summary" "$findings"
+}
+
+function parse_sast_report() {
+    local report_file="$1"
+    local summary="No SAST report provided."
+    local findings="No vulnerabilities found."
+    local vuln_count=0
+    
+    if [ ! -f "$report_file" ] || [ ! -s "$report_file" ]; then
+        echo "$summary" "$findings"
+        return
+    fi
+    
+    summary="SAST report file found at: $report_file"
+    
+    if ! jq -e '.' "$report_file" >/dev/null 2>&1; then
+        findings="Invalid JSON format in SAST report."
+        echo "$summary" "$findings"
+        return
+    fi
+    
+    # Check if vulnerabilities exist and format them
+    if jq -e '.vulnerabilities' "$report_file" >/dev/null 2>&1; then
+        vuln_count=$(jq '.vulnerabilities | length' "$report_file")
+        
+        if [ "$vuln_count" -gt 0 ]; then
+            findings=$(jq -r '
+        .vulnerabilities |
+        sort_by(.severity) | reverse |
+        .[0:5] |
+        map("- **" + (.name // "Unnamed vulnerability") + "**: " +
+            "Severity: " + (.severity // "unknown") + ", " +
+            "Location: " + (.location.file // "unknown") + ":" + ((.location.start_line|tostring) // "unknown") + ", " +
+            "Description: " + (.description // "No description")) |
+        join("\n")
+            ' "$report_file" 2>/dev/null || echo "Error parsing SAST vulnerabilities")
+        else
+            findings="No vulnerabilities found in SAST report."
+        fi
+    else
+        findings="No vulnerabilities section found in SAST report."
+    fi
+    
+    echo "$summary" "$findings"
+}
+
+# --- Main execution ---
+log_info "Generating troubleshooting report..."
+
+# Parse test results
+read -r TOTAL_TESTS PASSED_TESTS FAILED_TESTS ERROR_TESTS SKIPPED_TESTS < <(parse_junit_results "$JUNIT_XML")
+log_info "Test results: Total=$TOTAL_TESTS, Passed=$PASSED_TESTS, Failed=$FAILED_TESTS, Errors=$ERROR_TESTS, Skipped=$SKIPPED_TESTS"
+
+# System information
 NODE_VERSION=$(node -v 2>/dev/null || echo "Not installed")
 NPM_VERSION=$(npm -v 2>/dev/null || echo "Not installed")
 OS_INFO=$(uname -a 2>/dev/null || echo "Unknown")
 
-# --- Environment Variables ---
-ENV_VARS=("REPORTS_DIR" "NODE_ENV" "API_BASE_URL" "METADATA_URL")
+# Environment variables
+ENV_VARS=("REPORTS_DIR" "NODE_ENV")
 
-# --- Coverage Reports ---
+# Coverage reports
 COVERAGE_REPORTS=""
 if [ -n "$COVERAGE_DIR" ] && [ -d "$COVERAGE_DIR" ]; then
-    COVERAGE_REPORTS=$(find "$COVERAGE_DIR" -name "*.html" | sort || true)
+    COVERAGE_REPORTS=$(find "$COVERAGE_DIR" -name "*.html" -type f | sort || true)
 fi
 
-# --- Security Scan ---
-SECURITY_SUMMARY="No security report provided."
-SECURITY_FINDINGS="No vulnerabilities found."
+# Security scan
+read -r SECURITY_SUMMARY SECURITY_FINDINGS < <(parse_security_report "$SECURITY_REPORT_FILE")
 
-if [ -f "$SECURITY_REPORT_FILE" ] && [ -s "$SECURITY_REPORT_FILE" ]; then
-    SECURITY_SUMMARY="Security report file found at: $SECURITY_REPORT_FILE"
-    if jq -e '.' "$SECURITY_REPORT_FILE" >/dev/null 2>&1; then
-        SECURITY_FINDINGS=$(jq -r '.' "$SECURITY_REPORT_FILE" 2>/dev/null || echo "Error parsing security report")
-    fi
-fi
+# SAST scan
+read -r SAST_SUMMARY SAST_FINDINGS < <(parse_sast_report "$SAST_REPORT_FILE")
 
-# --- SAST Scan ---
-SAST_SUMMARY="No SAST report provided."
-SAST_FINDINGS="No vulnerabilities found."
-
-if [ -f "$SAST_REPORT_FILE" ] && [ -s "$SAST_REPORT_FILE" ]; then
-    SAST_SUMMARY="SAST report file found at: $SAST_REPORT_FILE"
-    if grep -q "\"vulnerabilities\":" "$SAST_REPORT_FILE"; then
-        SAST_FINDINGS=$(jq -r '
-          .vulnerabilities |
-          sort_by(.severity) | reverse |
-          .[0:5] |
-          map("- **" + .name + "**: Severity: " + .severity + ", Location: " + .location.file + ":" + (.location.start_line|tostring) + ", Description: " + (.description // "No description")) |
-          join("\n")
-        ' "$SAST_REPORT_FILE" 2>/dev/null || echo "Error parsing SAST vulnerabilities")
-    fi
-fi
-
-# --- Network Connectivity ---
-METADATA_URL="${METADATA_URL:-}"
-API_BASE_URL="${API_BASE_URL:-}"
-METADATA_STATUS="N/A"
-API_STATUS="N/A"
-if [ -n "$METADATA_URL" ]; then
-    if curl -s --head --request GET "$METADATA_URL" | grep "200 OK" >/dev/null; then METADATA_STATUS="OK"; else METADATA_STATUS="FAIL"; fi
-fi
-if [ -n "$API_BASE_URL" ]; then
-    if curl -s --head --request GET "$API_BASE_URL" | grep "200 OK" >/dev/null; then API_STATUS="OK"; else API_STATUS="FAIL"; fi
-fi
-
-# --- Disk Space ---
+# Disk space
 DISK_SPACE=$(df -h | grep -v "tmpfs" || echo "Unable to retrieve disk space info")
 
 # --- Generate HTML Report ---
+log_info "Creating HTML report at $REPORT_FILE"
+
 cat > "$REPORT_FILE" <<EOF
 <!DOCTYPE html>
 <html lang="en">
@@ -194,14 +286,6 @@ cat >> "$REPORT_FILE" <<EOF
 </div>
 
 <div class="section">
-<h2>Network Connectivity</h2>
-<ul>
-<li><strong>Metadata URL:</strong> ${METADATA_URL} - <span>${METADATA_STATUS}</span></li>
-<li><strong>API Base URL:</strong> ${API_BASE_URL} - <span>${API_STATUS}</span></li>
-</ul>
-</div>
-
-<div class="section">
 <h2>Disk Space</h2>
 <pre>${DISK_SPACE}</pre>
 </div>
@@ -214,4 +298,4 @@ cat >> "$REPORT_FILE" <<EOF
 </html>
 EOF
 
-echo "Enhanced troubleshooting report generated at: $REPORT_FILE"
+log_info "Enhanced troubleshooting report generated at: $REPORT_FILE"

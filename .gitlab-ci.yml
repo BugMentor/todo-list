@@ -13,15 +13,19 @@ stages:
 - deploy
 
 variables:
+  # Consistent naming for directories and files
   PLAYWRIGHT_REPORTS_DIR: playwright-report
   SERVER_LOG_FILE: server.log
   SECURITY_REPORT_FILE: security-report.json
   ANALYSIS_OUTPUT_FILE: analysis_results.json
   PYTHON_ANALYZER_SCRIPT: scripts/duo_troubleshoot_analyzer.py
   TROUBLESHOOT_REPORT_FILE: troubleshooting-report.html
+  # SAST configuration
   SAST_EXCLUDED_PATHS: "node_modules, dist, coverage, playwright-report"
   SAST_ANALYZER_IMAGE_TAG: 3
   SCAN_KUBERNETES_MANIFESTS: "false"
+  # Environment
+  NODE_ENV: development
 
 # Shared pipeline rules
 .default_rules: &default_rules
@@ -111,10 +115,14 @@ nodejs-scan-sast:
   stage: security
   needs:
   - build
+  variables:
+    SAST_EXCLUDED_ANALYZERS: "" # Enable all analyzers
+    SAST_EXCLUDED_PATHS: "node_modules, dist, coverage, playwright-report"
   artifacts:
     reports:
       sast: gl-sast-report.json
 
+# Security scan with npm audit
 security_scan:
   stage: security
   needs:
@@ -126,21 +134,25 @@ security_scan:
   - |
     if [ -s "${SECURITY_REPORT_FILE}" ]; then
       echo "Security report generated successfully"
-      CRITICAL=$(jq '.vulnerabilities | map(select(.severity == "critical")) | length' "${SECURITY_REPORT_FILE}" 2>/dev/null || echo 0)
-      HIGH=$(jq '.vulnerabilities | map(select(.severity == "high")) | length' "${SECURITY_REPORT_FILE}" 2>/dev/null || echo 0)
-      MEDIUM=$(jq '.vulnerabilities | map(select(.severity == "moderate")) | length' "${SECURITY_REPORT_FILE}" 2>/dev/null || echo 0)
-      LOW=$(jq '.vulnerabilities | map(select(.severity == "low")) | length' "${SECURITY_REPORT_FILE}" 2>/dev/null || echo 0)
-      TOTAL=$((CRITICAL + HIGH + MEDIUM + LOW))
+      # Fixed JQ queries to match npm audit format
+      CRITICAL=$(jq '.metadata.vulnerabilities.critical' "${SECURITY_REPORT_FILE}" 2>/dev/null || echo 0)
+      HIGH=$(jq '.metadata.vulnerabilities.high' "${SECURITY_REPORT_FILE}" 2>/dev/null || echo 0)
+      MEDIUM=$(jq '.metadata.vulnerabilities.moderate' "${SECURITY_REPORT_FILE}" 2>/dev/null || echo 0)
+      LOW=$(jq '.metadata.vulnerabilities.low' "${SECURITY_REPORT_FILE}" 2>/dev/null || echo 0)
+      TOTAL=$(jq '.metadata.vulnerabilities.total' "${SECURITY_REPORT_FILE}" 2>/dev/null || echo 0)
+      
       echo "Security Scan Summary:"
       echo "Critical: ${CRITICAL}"
       echo "High:     ${HIGH}"
       echo "Medium:   ${MEDIUM}"
       echo "Low:      ${LOW}"
       echo "Total:    ${TOTAL}"
-      if [ $((CRITICAL + HIGH)) -gt 0 ]; then
-        echo "Critical and High Vulnerabilities:"
-        jq -r '.vulnerabilities | to_entries | map(select(.value.severity == "critical" or .value.severity == "high")) | .[0:5] | map("- " + .key + ": " + .value.severity + " severity, " + (.value.via[0].title // "No title")) | .[]' "${SECURITY_REPORT_FILE}"
-        if [ "${CRITICAL}" -gt 0 ]; then
+      
+      if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+        echo "Critical or High Vulnerabilities found:"
+        jq -r '.vulnerabilities | keys | .[0:5] | map("- " + . + ": " + (.severity // "unknown") + " severity") | .[]' "${SECURITY_REPORT_FILE}" 2>/dev/null || echo "Error parsing vulnerabilities"
+        
+        if [ "$CRITICAL" -gt 0 ]; then
           echo "Critical vulnerabilities found! Pipeline will fail."
           exit 1
         fi
@@ -154,7 +166,7 @@ security_scan:
     paths:
     - ${SECURITY_REPORT_FILE}
     reports:
-      dependency_scanning: ${SECURITY_REPORT_FILE} # ✅ Valid GitLab type
+      dependency_scanning: ${SECURITY_REPORT_FILE}
     expire_in: 1 week
   allow_failure: true
   <<: *default_rules
@@ -187,7 +199,7 @@ analyze_results:
   artifacts:
     paths:
     - ${ANALYSIS_OUTPUT_FILE}
-    expire_in: 1 day
+    expire_in: 1 week
   <<: *default_rules
   when: always
 
@@ -211,7 +223,16 @@ generate_troubleshooting_report:
   - echo "--- Generating HTML Troubleshooting Report ---"
   - apt-get update && apt-get install -y jq curl
   - chmod +x scripts/troubleshoot_html_reporter.sh
-  - scripts/troubleshoot_html_reporter.sh "${PLAYWRIGHT_REPORTS_DIR}" "${CI_PROJECT_DIR}" "${CI_PIPELINE_ID}" "${CI_COMMIT_BRANCH}" "${NODE_ENV:-development}" "" "${SECURITY_REPORT_FILE}" "gl-sast-report.json"
+  - |
+    scripts/troubleshoot_html_reporter.sh \
+      "${PLAYWRIGHT_REPORTS_DIR}" \
+      "${CI_PROJECT_DIR}" \
+      "${CI_PIPELINE_ID}" \
+      "${CI_COMMIT_BRANCH}" \
+      "${NODE_ENV}" \
+      "" \
+      "${SECURITY_REPORT_FILE}" \
+      "gl-sast-report.json"
   - echo "--- HTML Troubleshooting Report Generated ---"
   artifacts:
     when: always
