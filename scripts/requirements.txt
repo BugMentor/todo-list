@@ -1,7 +1,3 @@
 # Requirements for duo_troubleshoot_analyzer.py
 argparse
 typing
-xml-etree-elementtree
-pytest
-pytest-playwright
-playwright
