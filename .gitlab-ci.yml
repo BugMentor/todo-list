@@ -56,8 +56,8 @@ test:
      exit 1)
   - echo "--- Running Playwright tests ---"
   - mkdir -p "${PLAYWRIGHT_REPORTS_DIR}"
-  # Specify exact output file for JUnit report
-  - npx playwright test --reporter=html --reporter=junit:${PLAYWRIGHT_REPORTS_DIR}/junit.xml
+  # Fixed Playwright command with proper reporter syntax
+  - npx playwright test --reporter=html --reporter=junit --output="${PLAYWRIGHT_REPORTS_DIR}/junit.xml"
   - PLAYWRIGHT_EXIT_CODE=$?
   - echo "Stopping TODO app..."
   - pkill -f "http-server" || true
