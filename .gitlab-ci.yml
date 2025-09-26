@@ -64,7 +64,7 @@ test:
   - echo "--- Running Playwright tests ---"
   - mkdir -p "${PLAYWRIGHT_REPORTS_DIR}"
   # Fixed command: Using proper reporter syntax for JUnit
-  - npx playwright test --reporter=html --reporter=junit:${PLAYWRIGHT_REPORTS_DIR}/junit.xml
+  - npx playwright test --reporter=html --reporter="junit=${PLAYWRIGHT_REPORTS_DIR}/junit.xml"
   - PLAYWRIGHT_EXIT_CODE=$?
 
   # Cleanup
