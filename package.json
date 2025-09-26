@@ -6,7 +6,7 @@
   "scripts": {
     "start": "npx http-server ./ -p 3000",
     "test": "npx playwright test",
-    "test:ci": "npx playwright test --reporter=html --reporter=junit:playwright-report/junit.xml",
+    "test:ci": "npx playwright test --reporter=html --reporter=junit --output=playwright-report/junit.xml",
     "test:ui": "npx playwright test --ui"
   },
   "repository": {
@@ -33,5 +33,8 @@
     "@playwright/test": "^1.55.1",
     "@types/node": "^24.5.2",
     "http-server": "^14.1.1"
+  },
+  "dependencies": {
+    "junit": "^0.5.1"
   }
 }
