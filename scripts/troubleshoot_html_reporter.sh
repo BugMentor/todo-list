@@ -30,7 +30,8 @@ html_escape() {
   printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g'
 }
 
-# parse junit results
+# --- parse junit results ----------------------------------------------------
+
 parse_junit() {
   local xml="$1"
   local total=0 passed=0 failures=0 errors=0 skipped=0
@@ -52,14 +53,22 @@ parse_junit() {
     skipped=$(sed -n 's/.*skipped="\([^"]*\)".*/\1/p' "$xml" | head -n1 || echo 0)
   fi
 
+  # Ensure all variables are numeric
   total=${total:-0}; failures=${failures:-0}; errors=${errors:-0}; skipped=${skipped:-0}
+  total=$(echo "$total" | tr -cd '0-9')
+  failures=$(echo "$failures" | tr -cd '0-9')
+  errors=$(echo "$errors" | tr -cd '0-9')
+  skipped=$(echo "$skipped" | tr -cd '0-9')
+
+  # Calculate passed
   passed=$(( total - failures - errors - skipped ))
   [ "$passed" -lt 0 ] && passed=0
 
   echo "$total $passed $failures $errors $skipped"
 }
 
-# security summary
+# --- security summary -------------------------------------------------------
+
 security_summary_html() {
   local file="$1"
   if [ -z "$file" ] || [ ! -f "$file" ]; then
@@ -72,9 +81,7 @@ security_summary_html() {
     return
   fi
 
-  local total critical high moderate low summary_html top_list
-  total=0; critical=0; high=0; moderate=0; low=0; summary_html=""; top_list=""
-
+  local total=0 critical=0 high=0 moderate=0 low=0 summary_html="" top_list=""
   if jq -e '.metadata.vulnerabilities' "$file" >/dev/null 2>&1; then
     total=$(jq -r '.metadata.vulnerabilities.total // 0' "$file" 2>/dev/null || echo 0)
     critical=$(jq -r '.metadata.vulnerabilities.critical // 0' "$file" 2>/dev/null || echo 0)
@@ -82,10 +89,10 @@ security_summary_html() {
     moderate=$(jq -r '.metadata.vulnerabilities.moderate // 0' "$file" 2>/dev/null || echo 0)
     low=$(jq -r '.metadata.vulnerabilities.low // 0' "$file" 2>/dev/null || echo 0)
   elif jq -e '.vulnerabilities' "$file" >/dev/null 2>&1; then
-    critical=$(jq -r '(.vulnerabilities // {}) | ( if type=="object" then to_entries | map(.value.severity) else map(.severity) end ) | map(select(.=="critical")) | length' "$file" 2>/dev/null || echo 0)
-    high=$(jq -r '(.vulnerabilities // {}) | ( if type=="object" then to_entries | map(.value.severity) else map(.severity) end ) | map(select(.=="high")) | length' "$file" 2>/dev/null || echo 0)
-    moderate=$(jq -r '(.vulnerabilities // {}) | ( if type=="object" then to_entries | map(.value.severity) else map(.severity) end ) | map(select(.=="moderate" or .=="medium")) | length' "$file" 2>/dev/null || echo 0)
-    low=$(jq -r '(.vulnerabilities // {}) | ( if type=="object" then to_entries | map(.value.severity) else map(.severity) end ) | map(select(.=="low")) | length' "$file" 2>/dev/null || echo 0)
+    critical=$(jq -r '(.vulnerabilities // {}) | (if type=="object" then to_entries | map(.value.severity) else map(.severity) end) | map(select(.=="critical")) | length' "$file" 2>/dev/null || echo 0)
+    high=$(jq -r '(.vulnerabilities // {}) | (if type=="object" then to_entries | map(.value.severity) else map(.severity) end) | map(select(.=="high")) | length' "$file" 2>/dev/null || echo 0)
+    moderate=$(jq -r '(.vulnerabilities // {}) | (if type=="object" then to_entries | map(.value.severity) else map(.severity) end) | map(select(.=="moderate" or .=="medium")) | length' "$file" 2>/dev/null || echo 0)
+    low=$(jq -r '(.vulnerabilities // {}) | (if type=="object" then to_entries | map(.value.severity) else map(.severity) end) | map(select(.=="low")) | length' "$file" 2>/dev/null || echo 0)
     total=$((critical + high + moderate + low))
   else
     summary_html="<pre>$(html_escape "$(jq -r . "$file" 2>/dev/null || cat "$file" | html_escape)")</pre>"
@@ -99,13 +106,17 @@ security_summary_html() {
       <div style='padding:8px;border-radius:6px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.06)'><strong>Moderate</strong><div style='color:#e6b800'>$moderate</div></div>
       <div style='padding:8px;border-radius:6px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.06)'><strong>Low</strong><div style='color:#2f9b3a'>$low</div></div>
     </div>"
+
     if [ "$total" -gt 0 ]; then
       top_list=$(jq -r '(.vulnerabilities // {}) | to_entries | .[0:5] | map("- " + .key + " (severity: " + ( .value.severity // "unknown") + ")") | .[]' "$file" 2>/dev/null || true)
       [ -n "$top_list" ] && summary_html+="<p><strong>Top vulnerabilities:</strong></p><ul>$(echo "$top_list" | sed 's/^/<li>/;s/$/<\/li>/')</ul>"
     fi
   fi
+
   echo "$summary_html"
 }
+
+# --- Duo recommendations ---------------------------------------------------
 
 extract_duo_recommendations_html() {
   local analysis="$1"
@@ -114,8 +125,8 @@ extract_duo_recommendations_html() {
 
   local recs html
   recs=$(jq -r '( .duo.recommendations // .recommendations // .suggestions // .duo_recommendations ) as $r
-    | if $r == null then empty
-      elif ($r | type) == "array" then ($r[]) else $r end' "$analysis" 2>/dev/null || true)
+    | if $r == null then empty elif ($r | type) == "array" then ($r[]) else $r end' "$analysis" 2>/dev/null || true)
+
   [ -z "$recs" ] && echo "" && return
 
   html="<ul>"
@@ -123,6 +134,8 @@ extract_duo_recommendations_html() {
   html+="</ul>"
   echo "$html"
 }
+
+# --- coverage ---------------------------------------------------------------
 
 check_coverage_reports() {
   local covdir="$1"
@@ -151,10 +164,11 @@ check_coverage_reports() {
       fi
     fi
   fi
+
   printf '%s\n' "$covhtml" "$covsum"
 }
 
-# --- gather data -------------------------------------------------------------
+# --- gather data ------------------------------------------------------------
 
 read -r TOTAL PASSED FAILS ERRORS SKIPPED < <(parse_junit "$JUNIT_XML")
 NODE_VERSION=$(node -v 2>/dev/null || echo "N/A")
@@ -164,7 +178,7 @@ OS_INFO=$(uname -a 2>/dev/null || echo "Unknown")
 read -r COVERAGE_HTML COVERAGE_SUMMARY < <(check_coverage_reports "$COVERAGE_DIR")
 SECURITY_HTML=$(security_summary_html "$SECURITY_REPORT_FILE")
 
-# --- SAST
+# --- SAST -------------------------------------------------------------------
 SAST_HTML="<p>No SAST report available.</p>"
 if [ -n "$SAST_REPORT_FILE" ] && [ -f "$SAST_REPORT_FILE" ]; then
   if command -v jq >/dev/null 2>&1 && jq -e '.vulnerabilities' "$SAST_REPORT_FILE" >/dev/null 2>&1; then
@@ -175,8 +189,8 @@ if [ -n "$SAST_REPORT_FILE" ] && [ -f "$SAST_REPORT_FILE" ]; then
   fi
 fi
 
+# --- Duo --------------------------------------------------------------------
 DUO_HTML=$(extract_duo_recommendations_html "$ANALYSIS_JSON")
-# fallback if no Duo recommendations
 if [ -z "$DUO_HTML" ]; then
   fallback_html="<ul>"
   [ "$FAILS" -gt 0 ] || [ "$ERRORS" -gt 0 ] && fallback_html+="<li>Investigate failing tests and check Playwright logs/artifacts.</li>"
@@ -190,14 +204,14 @@ if [ -z "$DUO_HTML" ]; then
 
   pct=$(printf '%s\n' "$COVERAGE_SUMMARY" | sed -n 's/.*\([0-9]\+\)%.*$/\1/p' | head -n1 || echo "")
   [ -n "$pct" ] && [ "$pct" -lt 80 ] 2>/dev/null && fallback_html+="<li>Coverage is ${pct}%. Consider increasing test coverage (target >= 80%).</li>"
-
   fallback_html+="<li><em>These suggestions are fallback-generated because no Duo analyzer recommendations were found.</em></li></ul>"
   DUO_HTML="$fallback_html"
 fi
 
 DISK_SPACE=$(df -h | grep -v "tmpfs" || echo "Unable to query disk space")
 
-# --- render HTML -------------------------------------------------------------
+# --- render HTML ------------------------------------------------------------
+
 cat > "$TEMP_FILE" <<EOF
 <!doctype html>
 <html lang="en">
