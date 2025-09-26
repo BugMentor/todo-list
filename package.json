@@ -6,7 +6,7 @@
   "scripts": {
     "start": "npx http-server ./ -p 3000",
     "test": "npx playwright test",
-    "test:ci": "npx playwright test --reporter=html --reporter=junit --output=playwright-report/junit.xml",
+    "test:ci": "npx playwright test",
     "test:ui": "npx playwright test --ui"
   },
   "repository": {

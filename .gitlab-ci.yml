@@ -136,6 +136,7 @@ analyze_results:
   script:
   - echo "--- Running analysis script ---"
   - pip install --no-cache-dir --upgrade pip
+  - pip install requests # Added to fix the ModuleNotFoundError
   - CI_LOG_PLACEHOLDER="GitLab CI log content from test job (placeholder)"
   - |
     python3 "${PYTHON_ANALYZER_SCRIPT}" \
