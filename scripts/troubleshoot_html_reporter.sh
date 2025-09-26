@@ -105,8 +105,24 @@ if [ -f "$ANALYSIS_RESULTS_FILE" ]; then
     fi
 fi
 
-# Generate HTML report - using EOF with no variable expansion in the HTML
-cat > "$OUTPUT_FILE" << 'EOF'
+# Determine status class and text
+if [ "$FAILURES" -eq "0" ] && [ "$ERRORS" -eq "0" ]; then
+    STATUS_CLASS="status-success"
+    STATUS_TEXT="PASSED"
+else
+    STATUS_CLASS="status-error"
+    STATUS_TEXT="FAILED"
+fi
+
+# Add coverage link if directory exists
+if [ -d "$COVERAGE_DIR" ]; then
+    COVERAGE_LINK="<a href=\"../$COVERAGE_DIR/index.html\" target=\"_blank\">View Coverage Report</a>"
+else
+    COVERAGE_LINK=""
+fi
+
+# Generate HTML report using a safer approach with cat and variables
+cat > "$OUTPUT_FILE" << EOF
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -204,9 +220,9 @@ cat > "$OUTPUT_FILE" << 'EOF'
 <body>
     <div class="header">
         <h1>Pipeline Troubleshooting Report</h1>
-        <p>Branch: BRANCH_PLACEHOLDER | Pipeline: PIPELINE_PLACEHOLDER | Environment: ENV_PLACEHOLDER</p>
-        <div class="status STATUS_CLASS_PLACEHOLDER">
-            Status: STATUS_TEXT_PLACEHOLDER
+        <p>Branch: ${BRANCH} | Pipeline: ${PIPELINE_ID} | Environment: ${ENVIRONMENT}</p>
+        <div class="status ${STATUS_CLASS}">
+            Status: ${STATUS_TEXT}
         </div>
     </div>
 
@@ -215,101 +231,60 @@ cat > "$OUTPUT_FILE" << 'EOF'
         <div class="metrics">
             <div class="metric-card">
                 <h3>Total</h3>
-                <div class="metric-value">TOTAL_TESTS_PLACEHOLDER</div>
+                <div class="metric-value">${TOTAL_TESTS}</div>
             </div>
             <div class="metric-card">
                 <h3>Passed</h3>
-                <div class="metric-value">PASSED_TESTS_PLACEHOLDER</div>
+                <div class="metric-value">${PASSED}</div>
             </div>
             <div class="metric-card">
                 <h3>Failed</h3>
-                <div class="metric-value">FAILED_TESTS_PLACEHOLDER</div>
+                <div class="metric-value">${FAILURES}</div>
             </div>
             <div class="metric-card">
                 <h3>Errors</h3>
-                <div class="metric-value">ERROR_TESTS_PLACEHOLDER</div>
+                <div class="metric-value">${ERRORS}</div>
             </div>
             <div class="metric-card">
                 <h3>Skipped</h3>
-                <div class="metric-value">SKIPPED_TESTS_PLACEHOLDER</div>
+                <div class="metric-value">${SKIPPED}</div>
             </div>
         </div>
 
         <h3>Coverage</h3>
-        <p>COVERAGE_STATUS_PLACEHOLDER</p>
+        <p>${COVERAGE_STATUS}</p>
 
         <h3>Test Duration</h3>
-        <p>TEST_DURATION_PLACEHOLDER seconds</p>
+        <p>${TEST_DURATION} seconds</p>
     </div>
 
     <div class="card">
         <h2>Security Scan</h2>
-        <pre>SECURITY_VULNS_PLACEHOLDER</pre>
+        <pre>${SECURITY_VULNS}</pre>
     </div>
 
     <div class="card">
         <h2>System Information</h2>
-        <p><strong>Node.js:</strong> NODE_VERSION_PLACEHOLDER</p>
-        <p><strong>NPM:</strong> NPM_VERSION_PLACEHOLDER</p>
-        <p><strong>OS:</strong> OS_INFO_PLACEHOLDER</p>
+        <p><strong>Node.js:</strong> ${NODE_VERSION}</p>
+        <p><strong>NPM:</strong> ${NPM_VERSION}</p>
+        <p><strong>OS:</strong> ${OS_INFO}</p>
         <p><strong>Disk Space:</strong></p>
-        <pre>DISK_SPACE_PLACEHOLDER</pre>
+        <pre>${DISK_SPACE}</pre>
     </div>
 
     <div class="card">
         <h2>Recommendations from Duo</h2>
         <div class="recommendations">
-            <pre>DUO_RECOMMENDATIONS_PLACEHOLDER</pre>
+            <pre>${DUO_RECOMMENDATIONS}</pre>
         </div>
     </div>
 
     <div class="links">
-        <a href="../PLAYWRIGHT_DIR_PLACEHOLDER/index.html" target="_blank">View Playwright Report</a>
-        COVERAGE_LINK_PLACEHOLDER
+        <a href="../${PLAYWRIGHT_REPORTS_DIR}/index.html" target="_blank">View Playwright Report</a>
+        ${COVERAGE_LINK}
     </div>
 </body>
 </html>
 EOF
-
-# Now replace the placeholders with actual values
-# This avoids shellcheck issues with the heredoc
-sed -i "s|BRANCH_PLACEHOLDER|$BRANCH|g" "$OUTPUT_FILE"
-sed -i "s|PIPELINE_PLACEHOLDER|$PIPELINE_ID|g" "$OUTPUT_FILE"
-sed -i "s|ENV_PLACEHOLDER|$ENVIRONMENT|g" "$OUTPUT_FILE"
-
-# Set status class and text
-if [ "$FAILURES" -eq "0" ] && [ "$ERRORS" -eq "0" ]; then
-    sed -i "s|STATUS_CLASS_PLACEHOLDER|status-success|g" "$OUTPUT_FILE"
-    sed -i "s|STATUS_TEXT_PLACEHOLDER|PASSED|g" "$OUTPUT_FILE"
-else
-    sed -i "s|STATUS_CLASS_PLACEHOLDER|status-error|g" "$OUTPUT_FILE"
-    sed -i "s|STATUS_TEXT_PLACEHOLDER|FAILED|g" "$OUTPUT_FILE"
-fi
-
-# Replace test metrics
-sed -i "s|TOTAL_TESTS_PLACEHOLDER|$TOTAL_TESTS|g" "$OUTPUT_FILE"
-sed -i "s|PASSED_TESTS_PLACEHOLDER|$PASSED|g" "$OUTPUT_FILE"
-sed -i "s|FAILED_TESTS_PLACEHOLDER|$FAILURES|g" "$OUTPUT_FILE"
-sed -i "s|ERROR_TESTS_PLACEHOLDER|$ERRORS|g" "$OUTPUT_FILE"
-sed -i "s|SKIPPED_TESTS_PLACEHOLDER|$SKIPPED|g" "$OUTPUT_FILE"
-
-# Replace other placeholders
-sed -i "s|COVERAGE_STATUS_PLACEHOLDER|$COVERAGE_STATUS|g" "$OUTPUT_FILE"
-sed -i "s|TEST_DURATION_PLACEHOLDER|$TEST_DURATION|g" "$OUTPUT_FILE"
-sed -i "s|SECURITY_VULNS_PLACEHOLDER|$SECURITY_VULNS|g" "$OUTPUT_FILE"
-sed -i "s|NODE_VERSION_PLACEHOLDER|$NODE_VERSION|g" "$OUTPUT_FILE"
-sed -i "s|NPM_VERSION_PLACEHOLDER|$NPM_VERSION|g" "$OUTPUT_FILE"
-sed -i "s|OS_INFO_PLACEHOLDER|$OS_INFO|g" "$OUTPUT_FILE"
-sed -i "s|DISK_SPACE_PLACEHOLDER|$DISK_SPACE|g" "$OUTPUT_FILE"
-sed -i "s|DUO_RECOMMENDATIONS_PLACEHOLDER|$DUO_RECOMMENDATIONS|g" "$OUTPUT_FILE"
-sed -i "s|PLAYWRIGHT_DIR_PLACEHOLDER|$PLAYWRIGHT_REPORTS_DIR|g" "$OUTPUT_FILE"
-
-# Add coverage link if directory exists
-if [ -d "$COVERAGE_DIR" ]; then
-    COVERAGE_LINK="<a href=\"../$COVERAGE_DIR/index.html\" target=\"_blank\">View Coverage Report</a>"
-    sed -i "s|COVERAGE_LINK_PLACEHOLDER|$COVERAGE_LINK|g" "$OUTPUT_FILE"
-else
-    sed -i "s|COVERAGE_LINK_PLACEHOLDER||g" "$OUTPUT_FILE"
-fi
 
 echo "Troubleshooting report generated at $OUTPUT_FILE"
