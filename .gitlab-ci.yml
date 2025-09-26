@@ -6,6 +6,7 @@ stages:
 - test
 - security
 - analyze
+- report # New stage for HTML report generation
 - deploy
 
 variables:
@@ -14,6 +15,7 @@ variables:
   SECURITY_REPORT_FILE: security-report.json
   ANALYSIS_OUTPUT_FILE: analysis_results.json
   PYTHON_ANALYZER_SCRIPT: scripts/duo_troubleshoot_analyzer.py
+  TROUBLESHOOT_REPORT_FILE: troubleshooting-report.html # New variable
 
 # Shared pipeline rules
 .default_rules: &default_rules
@@ -40,13 +42,13 @@ test:
   stage: test
   image: mcr.microsoft.com/playwright:v1.55.1
   cache:
-    key: ${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHA}
+    key: ${CI_COMMIT_REF_SLUG} # Improved cache key
     paths:
     - node_modules/
   script:
   - echo "--- Test Job Setup ---"
   - npm ci
-  - npm install -g http-server
+  - npm install -g http-server wait-on # Ensure wait-on is installed
 
   # Start the server in background
   - nohup http-server . -p 8080 -c-1 --silent > "${SERVER_LOG_FILE}" 2>&1 &
@@ -59,7 +61,7 @@ test:
   - mkdir -p "${PLAYWRIGHT_REPORTS_DIR}"
 
   # Generate both HTML and JUnit reports
-  - npx playwright test --reporter=html --reporter=junit:${PLAYWRIGHT_REPORTS_DIR}/junit.xml
+  - npx playwright test
   - PLAYWRIGHT_EXIT_CODE=$?
 
   # Cleanup server
@@ -77,19 +79,19 @@ test:
     reports:
       junit: ${PLAYWRIGHT_REPORTS_DIR}/junit.xml
   retry:
-    max: 2
+    max: 1 # Reduced retry count
     when:
     - script_failure
   <<: *default_rules
 
 # HTML Report generation
-html_report:
+collect_playwright_html_report:
   stage: analyze
   needs:
   - job: test
     artifacts: true
   script:
-  - echo "Processing HTML report from ${PLAYWRIGHT_REPORTS_DIR}..."
+  - echo "Collecting Playwright HTML report from ${PLAYWRIGHT_REPORTS_DIR}..."
   - ls -la "${PLAYWRIGHT_REPORTS_DIR}"
   artifacts:
     paths:
@@ -106,7 +108,7 @@ security_scan:
   script:
   - echo "Running security scan..."
   - apt-get update && apt-get install -y jq
-  - npm audit --json > "${SECURITY_REPORT_FILE}" || true
+  - npm audit --json > "${SECURITY_REPORT_FILE}"
   - |
     if [ -s "${SECURITY_REPORT_FILE}" ]; then
       echo "Security report generated successfully"
@@ -121,7 +123,7 @@ security_scan:
   allow_failure: true
   <<: *default_rules
 
-# Analysis stage
+# Analysis stage (Python script)
 analyze_results:
   stage: analyze
   image: python:3.10-slim-buster
@@ -134,7 +136,6 @@ analyze_results:
   script:
   - echo "--- Running analysis script ---"
   - pip install --no-cache-dir --upgrade pip
-  - chmod +x "${PYTHON_ANALYZER_SCRIPT}"
   - CI_LOG_PLACEHOLDER="GitLab CI log content from test job (placeholder)"
   - |
     python3 "${PYTHON_ANALYZER_SCRIPT}" \
@@ -153,11 +154,39 @@ analyze_results:
   <<: *default_rules
   when: always
 
+# Troubleshooting Report
+generate_troubleshooting_report:
+  stage: report
+  image: node:22
+  needs:
+  - job: test
+    artifacts: true
+  - job: security_scan
+    artifacts: true
+    optional: true
+  - job: analyze_results
+    artifacts: true
+    optional: true
+  script:
+  - echo "--- Generating HTML Troubleshooting Report ---"
+  - apt-get update && apt-get install -y jq curl
+  - chmod +x scripts/troubleshoot_html_reporter.sh
+  - scripts/troubleshoot_html_reporter.sh \ "${PLAYWRIGHT_REPORTS_DIR}" \ "${CI_PROJECT_DIR}" \ "${CI_PIPELINE_ID}" \ "${CI_COMMIT_BRANCH}" \ "${NODE_ENV:-development}"
+  - echo "--- HTML Troubleshooting Report Generated ---"
+  artifacts:
+    when: always
+    paths:
+    - "${TROUBLESHOOT_REPORT_FILE}"
+    expire_in: 1 week
+  <<: *default_rules
+  when: always
+
 # Deployment
 deploy:
   stage: deploy
   needs:
   - analyze_results
+  - generate_troubleshooting_report
   script:
   - echo "Deploying application..."
   # Add deployment commands here
