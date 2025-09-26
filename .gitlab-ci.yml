@@ -55,8 +55,9 @@ run_tests:
   script:
   - echo "START_TIME=$(date +%s)" > test_metrics.env
   - mkdir -p "${PLAYWRIGHT_REPORTS_DIR}"
+  - mkdir -p "${COVERAGE_DIR}"
   - npx playwright install --with-deps chromium
-  - npx playwright test --reporter=html,junit --output="${PLAYWRIGHT_REPORTS_DIR}"
+  - npx playwright test
   - ls -la "${PLAYWRIGHT_REPORTS_DIR}"
   - echo "END_TIME=$(date +%s)" >> test_metrics.env
   - "START_TIME=$(grep START_TIME test_metrics.env | cut -d= -f2)"
@@ -94,6 +95,7 @@ analyze_results:
   script:
   - pip install -r scripts/requirements.txt
   - ls -la "${PLAYWRIGHT_REPORTS_DIR}" || echo "Playwright reports directory not found"
+  - ls -la "${COVERAGE_DIR}" || echo "Coverage directory not found"
   - "if [ -f \"${PLAYWRIGHT_REPORTS_DIR}/junit.xml\" ]; then echo \"JUnit report exists\"; else echo \"JUnit report missing\"; fi"
   - "if [ -f \"${SECURITY_REPORT_FILE}\" ]; then echo \"Security report exists\"; else echo \"Security report missing\"; fi"
   - python "${PYTHON_ANALYZER_SCRIPT}" --gitlab-ci-log-placeholder "${CI_JOB_URL}" --playwright-html-report-path "${PLAYWRIGHT_REPORTS_DIR}" --junit-xml-report-path "${PLAYWRIGHT_REPORTS_DIR}/junit.xml" --security-scan-report-path "${SECURITY_REPORT_FILE}" --server-log-path "${SERVER_LOG_FILE}" --output-file "${ANALYSIS_OUTPUT_FILE}" || true
