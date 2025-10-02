@@ -1,178 +1,129 @@
-[![Stand With Palestine](https://raw.githubusercontent.com/TheBSD/StandWithPalestine/main/banner-no-action.svg)](https://thebsd.github.io/StandWithPalestine)
+# 🤖 Playwright Todo App: A Target for CI/CD Troubleshooting
 
-#  <img src="https://github.com/takitajwar17/Simple-Todo-List-Refactored/assets/111155827/4b1c2e01-f24b-4f39-899e-c356d468e386" width="300">
+<div align="center">
+  <img src="https://raw.githubusercontent.com/abdellatif-laghjaj/todo-list/main/assets/todo_app_screenshot.png" alt="Playwright Todo App Screenshot" width="300">
+  
+  <p align="center">A simple web-based Todo List application designed as a practical target for **End-to-End Testing** and **AI-Driven CI/CD Pipeline Troubleshooting** using **GitLab Duo**.</p>
+  
+  <a href="https://github.com/microsoft/playwright">
+    <img src="https://img.shields.io/badge/Tested%20With-Playwright-brightgreen?style=for-the-badge&logo=playwright" alt="Tested with Playwright">
+  </a>
+  <a href="https://docs.gitlab.com/ee/user/gitlab_duo/">
+    <img src="https://img.shields.io/badge/AI%20Troubleshooting-GitLab%20Duo-orange?style=for-the-badge&logo=gitlab" alt="GitLab Duo AI">
+  </a>
+</div>
 
-## Simple Todo List App Docs
+---
 
 ## Table of Contents
 
-1. [Introduction](#1-introduction)
-2. [Project Overview](#2-project-overview)
-3. [Getting Started](#3-getting-started)
-4. [Code Structure](#4-code-structure)
-5. [Dependencies](#5-dependencies)
-6. [Code Refactoring](#6-code-refactoring)
-7. [Deployment](#7-deployment)
-8. [Usage](#8-usage)
-9. [License](#9-license)
+- [🤖 Playwright Todo App: A Target for CI/CD Troubleshooting](#-playwright-todo-app-a-target-for-cicd-troubleshooting)
+  - [Table of Contents](#table-of-contents)
+  - [1. Introduction](#1-introduction)
+  - [2. Context: Target for GitLab Duo AI](#2-context-target-for-gitlab-duo-ai)
+    - [🚀 The Duo Troubleshooting Stage](#-the-duo-troubleshooting-stage)
+      - [A. Pipeline Failure Analysis (Demo Scenario 1)](#a-pipeline-failure-analysis-demo-scenario-1)
+      - [B. Security Vulnerability Analysis (Demo Scenario 2)](#b-security-vulnerability-analysis-demo-scenario-2)
+  - [3. Project Overview \& Features](#3-project-overview--features)
+  - [4. Getting Started](#4-getting-started)
+    - [Prerequisites](#prerequisites)
+    - [Installation](#installation)
+  - [5. Dependencies \& Tech Stack](#5-dependencies--tech-stack)
+  - [6. Code Architecture (Refactoring Focus)](#6-code-architecture-refactoring-focus)
+  - [7. License](#7-license)
+
+---
 
 ## 1. Introduction
 
-Welcome to the documentation for the TO-DOIT App, a simple and refactored project designed to manage your tasks efficiently. This document provides an overview of the project, its code structure, refactoring details, clean code practices, design patterns, deployment information, and usage instructions.
+Welcome to the documentation for the **Playwright Todo App**.
 
-## 2. Project Overview
+This repository is utilized as the application under test (AUT) for demonstrating advanced **CI/CD Pipeline Optimization** and **Troubleshooting**. It features a modern, refactored codebase built with clean architecture principles, making it an ideal subject for robust **End-to-End (E2E) testing** and subsequent **AI analysis** of failures.
 
-The TO-DOIT App is a web-based application developed to help users manage their tasks by providing a user-friendly interface for adding, editing, and deleting tasks. The app also supports task filtering based on status (All, Pending, Completed) and incorporates a theme switcher for a personalized user experience.
+The primary focus of this project's CI pipeline is the integration of the **GitLab Duo AI** tool, which analyzes complex test failures and security reports to provide **actionable recommendations**.
 
-## 3. Getting Started
+---
 
-To get started with the TO-DOIT App, follow these steps:
+## 2. Context: Target for GitLab Duo AI
+
+This repository is designed to simulate the challenges addressed in the "AI-Driven Pipeline Optimization & Troubleshooting with GitLab Duo" presentation, specifically:
+
+### 🚀 The Duo Troubleshooting Stage
+The CI/CD configuration includes a dedicated stage, typically named `duo_troubleshoot`, which executes when a prior stage (like `e2e_tests` or `security_scan`) fails.
+
+#### A. Pipeline Failure Analysis (Demo Scenario 1)
+When Playwright E2E tests fail, this stage uses **GitLab Duo CLI** to analyze the lengthy, complex job logs.
+* **AI Output:** Provides a concise, human-readable summary of the failure, identifies the likely root cause, and suggests code remediation steps, significantly reducing **Mean Time To Resolution (MTTR)**.
+
+#### B. Security Vulnerability Analysis (Demo Scenario 2)
+When dependency or SAST scans (like `npm audit`) produce dense technical reports, this stage simplifies the output.
+* **AI Output:** Explains the vulnerability's impact, assigns a clear severity level, and outlines the precise steps needed to patch the issue.
+
+---
+
+## 3. Project Overview & Features
+
+The TO-DOIT App is a standard web-based task manager featuring:
+
+* **CRUD Operations:** Easily add, edit, and delete tasks.
+* **Status Management:** Mark tasks as pending or completed.
+* **Filtering:** Filter tasks by status (All, Pending, Completed).
+* **Theme Switching:** A persistent theme switcher.
+
+---
+
+## 4. Getting Started
+
+Follow these steps to set up and run the application locally:
 
 ### Prerequisites
-
-Make sure you have the following installed:
-
-- A modern web browser (e.g., Chrome, Firefox, Safari)
-- An internet connection (for fetching external dependencies)
+* Node.js (LTS recommended)
+* A modern web browser
+* Git
 
 ### Installation
 
-1. **Clone the Repository:**
+1.  **Clone the Repository:**
+    ```bash
+    git clone git@github.com:abdellatif-laghjaj/todo-list.git
+    ```
 
-   ```bash
-   git clone git@github.com:abdellatif-laghjaj/todo-list.git
-   ```
+2.  **Navigate and Install Dependencies:**
+    ```bash
+    cd todo-list
+    npm install  # Assuming npm is the package manager after refactoring
+    ```
 
-2. **Navigate to the Project Directory:**
+3.  **Run the Application (for local testing):**
+    Open the `index.html` file directly in your preferred web browser.
 
-   ```bash
-   cd todo-list
-   ```
+---
 
-3. **Open `index.html` in a Browser:**
+## 5. Dependencies & Tech Stack
 
-   Open the `index.html` file in your preferred web browser.
+This project utilizes modern web technologies:
 
+* **Core Language:** Vanilla JavaScript
+* **Styling:** **Tailwind CSS** and **Daisy UI** (via CDN).
+* **Testing (External):** Designed to be run with **Playwright** (though not contained in this repository, this is the environment for the Duo demo).
+* **CI/CD Tooling:** **GitLab CI/CD** and **GitLab Duo CLI**.
 
-## 4. Code Structure
+---
 
-The project follows a modular and organized structure to enhance readability, maintainability, and scalability. Key components include:
+## 6. Code Architecture (Refactoring Focus)
 
-- **HTML (`index.html`):** The main structure of the web page.
-- **CSS (`style.css`):** Styles to define the appearance of the web page.
-- **JavaScript (`main.js`):** Logic for handling user interactions, managing tasks, and implementing theme switching.
-- **Fonts (`Poppins`):** Imported from Google Fonts for consistent typography.
+The underlying codebase was heavily refactored to serve as a robust, maintainable target for testing. Key architectural highlights include:
 
-## 5. Dependencies
+* **Single Responsibility Principle (SRP):** Logic is strictly separated into dedicated classes:
+    * **`TodoManager`**: Handles all business logic and state management.
+    * **`UIManager`**: Handles all DOM manipulation and event listening.
+    * **`ThemeSwitcher`**: Manages theme state (using the **Singleton Pattern**).
+* **Design Patterns:**
+    * **Singleton Pattern** (`ThemeSwitcher`): Ensures centralized control over the application's theme.
+    * **Strategy Pattern** (`TodoItemFormatter`): Ensures consistent, interchangeable formatting logic for tasks.
 
-- **Tailwind CSS:** Used for styling the components. It's linked through CDN in the `index.html` file.
-- **Daisy UI:** A CSS library for UI components, linked through CDN.
-- **Boxicons:** Icons library, linked through CDN.
-- **Google Fonts (Poppins):** Font used for the app, linked in the `style.css` file.
+---
 
-## 6. Code Refactoring
+## 7. License
 
-### Code Smells Addressed:
-
-1. **Monolithic Structure:**
-   - **Code Smell:** Original code had a monolithic structure, making it harder to maintain.
-   - **Refactoring:** Introduced modularization through separate classes (`TodoItemFormatter`, `TodoManager`, `UIManager`, and `ThemeSwitcher`), each with a distinct responsibility.
-
-2. **Global Functions:**
-   - **Code Smell:** Original code used global functions for event handling, reducing modularity.
-   - **Refactoring:** Event handling encapsulated within the `UIManager` class, promoting better organization and separation of concerns.
-
-3. **HTML Manipulation in Multiple Places:**
-   - **Code Smell:** Original code directly manipulated HTML in scattered locations.
-   - **Refactoring:** Centralized HTML manipulation within the `UIManager` class for consistency.
-
-4. **Lack of Error Handling:**
-   - **Code Smell:** Original code lacked proper error handling.
-   - **Refactoring:** Introduced error handling in the `UIManager` class for improved user experience and robustness.
-
-### SOLID Violations Addressed:
-
-1. **Single Responsibility Principle (SRP):**
-   - **Violation:** Original code violated SRP by combining UI, business logic, and theme handling.
-   - **Refactoring:** Responsibilities separated into different classes (`TodoManager`, `UIManager`, `ThemeSwitcher`), adhering to SRP.
-
-2. **Open/Closed Principle (OCP):**
-   - **Violation:** Original code was less extensible, requiring modifications for new features.
-   - **Refactoring:** Designed for extensibility, allowing addition of new features without modifying existing classes.
-
-3. **Dependency Inversion Principle (DIP):**
-   - **Violation:** Original code exhibited high coupling.
-   - **Refactoring:** Followed DIP by depending on abstractions, enhancing flexibility and testability.
-
-### Design Pattern Violations Addressed:
-
-1. **Observer Pattern for Event Handling:**
-   - **Violation:** Original code used inline event listeners.
-   - **Refactoring:** Employed Observer pattern by encapsulating event handling within the `UIManager` class.
-
-2. **Strategy Pattern for Task Formatting:**
-   - **Violation:** Original code lacked a clear strategy for formatting tasks.
-   - **Refactoring:** Introduced a `TodoItemFormatter` class, applying the Strategy pattern for consistent task formatting.
-
-3. **Singleton Pattern for Theme Handling:**
-   - **Violation:** Original code lacked a clear structure for theme handling.
-   - **Refactoring:** Introduced a `ThemeSwitcher` class, applying the Singleton pattern for centralized theme management and persistence.
-
-### Class Responsibilities:
-
-1. **TodoItemFormatter:**
-   - Responsible for formatting individual task items.
-   - Implements the Strategy pattern to ensure consistent and uniform task formatting.
-
-2. **TodoManager:**
-   - Manages the overall logic related to todos.
-   - Responsible for creating, editing, deleting, and toggling the status of todo items.
-   - Encapsulates the todos array, ensuring centralized control over the application's state.
-
-3. **UIManager:**
-   - Manages the user interface components and interactions.
-   - Handles event listeners for user actions such as adding, editing, and deleting todos.
-   - Responsible for displaying todos in the HTML, handling user inputs, and showing alert messages.
-   - Ensures separation of concerns between UI-related activities and application logic.
-
-4. **ThemeSwitcher:**
-   - Handles theme-related functionalities.
-   - Implements the Singleton pattern to ensure a single instance responsible for theme switching.
-   - Manages the application's theme by updating the HTML's data-theme attribute.
-
-## 7. Deployment
-
-The TO-DOIT App is deployed and accessible online. You can use the following link to access the application: [TO-DOIT](https://todotify.vercel.app/)
-
-## 8. Usage
-
-1. **Adding a Task:**
-   - Enter the task in the input field.
-   - Optionally, set a due date using the date input.
-   - Press Enter or click the "+" button to add the task.
-
-2. **Editing a Task:**
-   - Click the "Edit" button on a task.
-   - Modify the task details.
-   - Click the "Check" button to save changes.
-
-3. **Completing a Task:**
-   - Click the "Check" button on a task to toggle its completion status.
-
-4. **Deleting a Task:**
-   - Click the "Trash" button on a task to delete it.
-
-5. **Filtering Tasks:**
-   - Use the "Filter" dropdown to filter tasks by status (All, Pending, Completed).
-
-6. **Clearing All Tasks:**
-   - Click the "Delete All" button to clear all tasks.
-
-7. **Theme Switching:**
-   - Use the palette icon in the top-right corner to open the theme switcher.
-   - Select a theme from the available options.
-
-
-## 9. License
-
-This project is licensed under the [MIT License](https://opensource.org/licenses/MIT) and was originally developed by [@abdellatif-laghjaj](https://github.com/abdellatif-laghjaj) with the contribution of [@takitajwar17](https://github.com/takitajwar17). 
+This project is licensed under the **[MIT License](https://opensource.org/licenses/MIT)**.
